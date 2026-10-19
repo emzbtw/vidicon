@@ -39,10 +39,12 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Check the tag matches Cargo.toml
+      - name: Check the tag matches Cargo.toml and flake.nix
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           test "v$version" = "$TAG" || { echo "Cargo.toml is $version, tag is $TAG"; exit 1; }
+          flake=$(sed -n 's/^ *version = "\(.*\)";$/\1/p' flake.nix | head -1)
+          test "$flake" = "$version" || { echo "flake.nix is $flake, Cargo.toml is $version"; exit 1; }
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Install Rust

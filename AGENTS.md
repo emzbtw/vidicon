@@ -26,6 +26,8 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
   if one looks wrong, say so.
 - `research/reference-players.md`: notes on ynoTV, open-tv and IPTVnator,
   the players this one is reacting against.
+- `docs/releasing.md`: releasing a version (bump, tag, AUR) and keeping the
+  release CI's install tests current. Read it before any version bump.
 
 ## Settled
 
