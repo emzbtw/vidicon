@@ -88,7 +88,7 @@ curl -LO https://github.com/emzbtw/vidicon/releases/latest/download/vidicon_amd6
 sudo apt install ./vidicon_amd64.deb
 ```
 
-On Fedora 36 or newer, install the .rpm:
+On Fedora 43 or newer, install the .rpm:
 
 ```sh
 sudo dnf install https://github.com/emzbtw/vidicon/releases/latest/download/vidicon.x86_64.rpm
