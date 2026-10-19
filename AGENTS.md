@@ -22,6 +22,8 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
 - `.scratch/stream-recovery/`: stream recovery milestone tickets, same rules.
 - `.scratch/refresh-panel/`, `.scratch/settings/`, `.scratch/onboarding/`,
   `.scratch/epg-sources/`: those milestones' tickets, same rules.
+- `.scratch/website/`: website milestone tickets (`site/`, Astro and
+  Starlight on GitHub Pages), same rules.
 - `docs/adr/`: settled decisions and the reasoning. Don't relitigate them;
   if one looks wrong, say so.
 - `research/reference-players.md`: notes on ynoTV, open-tv and IPTVnator,
