@@ -32,7 +32,10 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential pkg-config libfontconfig1-dev curl ca-certificates git
 
+      # The tag, not the branch a manual run starts from.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Check the tag matches Cargo.toml
         run: |
@@ -93,4 +96,8 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        # A pushed tag may not have a release yet.
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null ||
+            gh release create "$TAG" --verify-tag --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
