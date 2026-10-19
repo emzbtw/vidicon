@@ -8,11 +8,11 @@
 
 <p align="center">
   <a href="https://github.com/emzbtw/vidicon/releases/latest"><img src="https://img.shields.io/github/v/release/emzbtw/vidicon" alt="Latest release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-GPL--3.0--or--later-blue" alt="Licence: GPL-3.0-or-later"></a>
-  <img src="https://img.shields.io/badge/Rust-1.92%2B-orange?logo=rust" alt="Rust 1.92+">
   <a href="#nixos"><img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white" alt="Nix flake"></a>
   <img src="https://img.shields.io/badge/Linux-Wayland%20%7C%20X11-informational?logo=linux&logoColor=white" alt="Linux: Wayland or X11">
   <img src="https://img.shields.io/badge/source-Xtream%20Codes-555" alt="Source: Xtream Codes">
+  <img src="https://img.shields.io/badge/Rust-1.92%2B-orange?logo=rust" alt="Rust 1.92+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-GPL--3.0--or--later-blue" alt="Licence: GPL-3.0-or-later"></a>
 </p>
 
 <p align="center">
