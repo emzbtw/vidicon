@@ -70,15 +70,49 @@ filters in under 8 ms a keystroke.
 
 ## Install
 
-With Nix (flakes):
+### NixOS
+
+Add the flake as an input:
+
+```nix
+# flake.nix
+inputs.vidicon = {
+  url = "github:emzbtw/vidicon";
+  inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+and the package to a module (with `inputs` passed through `specialArgs`):
+
+```nix
+environment.systemPackages = [
+  inputs.vidicon.packages.${pkgs.stdenv.hostPlatform.system}.default
+];
+```
+
+With home-manager, put the same package in `home.packages` instead. The
+URL follows `main`; append `/vX.Y.Z` to pin a release. Your `flake.lock`
+holds the version until `nix flake update vidicon`. If your nixpkgs is
+older than vidicon needs (Rust 1.92), drop the `follows` line.
+
+The package brings mpv, ffmpeg and the Inter font, and adds a desktop
+entry. An mpv or ffmpeg already on your `PATH` comes first, with its config
+and scripts.
+
+### Other systems with Nix
+
+```sh
+nix profile add github:emzbtw/vidicon    # Nix before 2.30: nix profile install
+```
+
+This installs the same package as on NixOS, desktop entry included. To try
+it without installing:
 
 ```sh
 nix run github:emzbtw/vidicon
 ```
 
-The package brings mpv, ffmpeg and the Inter font, and installs a desktop
-entry. An mpv or ffmpeg already on your `PATH` comes first, with its config
-and scripts.
+### Debian and Ubuntu
 
 On Debian 12, Ubuntu 22.04 or newer, install the .deb from the
 [latest release](https://github.com/emzbtw/vidicon/releases/latest):
@@ -88,18 +122,22 @@ curl -LO https://github.com/emzbtw/vidicon/releases/latest/download/vidicon_amd6
 sudo apt install ./vidicon_amd64.deb
 ```
 
+It pulls in mpv, ffmpeg and Inter as dependencies. Ubuntu 22.04's Inter is
+3.19, which lacks Inter Display, so headings use another font there.
+
+### Fedora
+
 On Fedora 43 or newer, install the .rpm:
 
 ```sh
 sudo dnf install https://github.com/emzbtw/vidicon/releases/latest/download/vidicon.x86_64.rpm
 ```
 
-Both pull in mpv, ffmpeg and Inter as dependencies. Ubuntu 22.04's Inter is
-3.19, which lacks Inter Display, so headings use another font there. The
-release also has a
-tarball with the binary and desktop entry, and a `SHA256SUMS` file.
+It pulls in mpv, ffmpeg and Inter as dependencies.
 
-On Arch Linux, build the package from the repo's PKGBUILD:
+### Arch Linux
+
+Build the package from the repo's PKGBUILD:
 
 ```sh
 git clone https://github.com/emzbtw/vidicon
@@ -111,7 +149,9 @@ It downloads the tagged release, builds it, and installs mpv, ffmpeg and
 Inter as dependencies. `packaging/aur/vidicon-git` builds the latest `main`
 instead.
 
-To build from source on any distribution, you need:
+### From source
+
+To build on any distribution, you need:
 
 - Rust 1.92 or newer, to build
 - mpv, for playback
@@ -128,6 +168,11 @@ cargo build --release --no-default-features
 
 `--no-default-features` leaves out the developer tooling (screenshots, key
 replay, the `--probe-*` flags).
+
+The [latest release](https://github.com/emzbtw/vidicon/releases/latest)
+also has a tarball with a prebuilt binary and the desktop entry, for any
+distribution with glibc 2.35 or newer and the runtime dependencies above,
+and a `SHA256SUMS` file.
 
 ## First run
 
@@ -207,6 +252,8 @@ Vidicon is built on:
   the async runtime and HTTP.
 
 `Cargo.lock` has the full list of dependencies.
+
+Vidicon was written with the help of AI coding assistants.
 
 <a href="https://slint.dev">
   <picture>
