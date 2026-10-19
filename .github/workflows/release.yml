@@ -65,8 +65,10 @@ jobs:
         run: |
           strip target/release/vidicon
           mkdir dist
-          cargo deb --no-build --output dist/
-          cargo generate-rpm --output dist/
+          # Fixed names, so releases/latest/download links in the README
+          # never change. The packages still carry their version.
+          cargo deb --no-build --output dist/vidicon_amd64.deb
+          cargo generate-rpm --output dist/vidicon.x86_64.rpm
           tarball=vidicon-$VERSION-x86_64-linux
           mkdir "$tarball"
           cp target/release/vidicon README.md LICENSE "$tarball/"
