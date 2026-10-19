@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vidicon
+GenericName=IPTV Player
+Comment=Live TV, catch-up, movies and series from an Xtream provider
+Exec=vidicon
+Icon=vidicon
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=iptv;tv;xtream;
+StartupWMClass=vidicon

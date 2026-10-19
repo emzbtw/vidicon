@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# Fake mpv for screenshots: serves the IPC socket, plays nothing.
+import json, os, socket, sys, time
+path = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--input-ipc-server="))
+props = {"pause": False, "mute": False, "fullscreen": False}
+ids = {}
+srv = socket.socket(socket.AF_UNIX)
+srv.bind(path)
+srv.listen(1)
+conn, _ = srv.accept()
+f = conn.makefile("rw")
+def send(o):
+    f.write(json.dumps(o) + "\n"); f.flush()
+entry = 0
+loaded = time.time()
+start = 720
+for line in f:
+    cmd = json.loads(line)
+    c, rid = cmd["command"], cmd.get("request_id", 0)
+    if c[0] == "observe_property":
+        ids[c[2]] = c[1]
+        send({"request_id": rid, "error": "success"})
+        send({"event": "property-change", "id": c[1], "name": c[2], "data": props[c[2]]})
+    elif c[0] == "cycle":
+        props[c[1]] = not props[c[1]]
+        send({"request_id": rid, "error": "success"})
+        send({"event": "property-change", "id": ids[c[1]], "name": c[1], "data": props[c[1]]})
+    elif c[0] == "get_property" and c[1] in ("time-pos", "duration"):
+        # A movie's position and length (VOD ticket 04): the time since the
+        # load, from 12 min in or the `start=` asked (ticket 07), of 1 h 33 min.
+        data = start + time.time() - loaded if c[1] == "time-pos" else 5594.0
+        send({"request_id": rid, "error": "success", "data": data})
+    elif c[0] == "seek":
+        start, loaded = float(c[1]), time.time()
+        send({"request_id": rid, "error": "success"})
+    elif c[0] == "loadfile":
+        entry += 1
+        loaded = time.time()
+        opts = dict(o.split("=", 1) for o in c[4].split(",")) if len(c) > 4 else {}
+        start = float(opts.get("start", 720))
+        send({"request_id": rid, "error": "success", "data": {"playlist_entry_id": entry}})
+    elif c[0] == "quit":
+        break
+    else:
+        send({"request_id": rid, "error": "success"})
+os.unlink(path)
