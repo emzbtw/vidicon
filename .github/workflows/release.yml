@@ -3,7 +3,9 @@
 # packages to an existing release (the tag must match Cargo.toml's version).
 #
 # The build runs in an Ubuntu 22.04 container, so the binary needs glibc 2.35
-# or newer: Debian 12, Ubuntu 22.04, Fedora 36 and later.
+# or newer: Debian 12, Ubuntu 22.04, Fedora 36 and later. Before upload, each
+# package is installed and launched on the systems the README names
+# (packaging/test/install-test.sh); a failure on any of them stops the upload.
 name: Release packages
 
 on:
@@ -84,8 +86,38 @@ jobs:
           name: packages
           path: dist/
 
-  upload:
+  install-test:
     needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      # The oldest supported release of each distribution, which the README
+      # names, and its newest through the latest tag. Move the oldest up (and
+      # the README with it) when it reaches end of life.
+      matrix:
+        include:
+          - { image: 'debian:12', package: vidicon_amd64.deb }
+          - { image: 'debian:latest', package: vidicon_amd64.deb }
+          - { image: 'ubuntu:22.04', package: vidicon_amd64.deb }
+          - { image: 'ubuntu:latest', package: vidicon_amd64.deb }
+          - { image: 'fedora:43', package: vidicon.x86_64.rpm }
+          - { image: 'fedora:latest', package: vidicon.x86_64.rpm }
+    steps:
+      # The workflow's own commit, not the tag: an older tag may predate the
+      # test script.
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: dist
+
+      - name: Install and run ${{ matrix.package }}
+        run: sh packaging/test/install-test.sh "$PWD/dist/${{ matrix.package }}"
+
+  upload:
+    needs: install-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
