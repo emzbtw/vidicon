@@ -80,6 +80,23 @@ The package brings mpv, ffmpeg and the Inter font, and installs a desktop
 entry. An mpv or ffmpeg already on your `PATH` comes first, with its config
 and scripts.
 
+On Debian 12, Ubuntu 22.04 or newer, install the .deb from the
+[latest release](https://github.com/emzbtw/vidicon/releases/latest):
+
+```sh
+curl -LO https://github.com/emzbtw/vidicon/releases/download/v0.1.0/vidicon_0.1.0-1_amd64.deb
+sudo apt install ./vidicon_0.1.0-1_amd64.deb
+```
+
+On Fedora 36 or newer, install the .rpm:
+
+```sh
+sudo dnf install https://github.com/emzbtw/vidicon/releases/download/v0.1.0/vidicon-0.1.0-1.x86_64.rpm
+```
+
+Both pull in mpv, ffmpeg and Inter as dependencies. The release also has a
+tarball with the binary and desktop entry, and a `SHA256SUMS` file.
+
 On Arch Linux, build the package from the repo's PKGBUILD:
 
 ```sh
