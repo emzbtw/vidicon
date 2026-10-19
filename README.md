@@ -80,7 +80,19 @@ The package brings mpv, ffmpeg and the Inter font, and installs a desktop
 entry. An mpv or ffmpeg already on your `PATH` comes first, with its config
 and scripts.
 
-Without Nix, you need:
+On Arch Linux, build the package from the repo's PKGBUILD:
+
+```sh
+git clone https://github.com/emzbtw/vidicon
+cd vidicon/packaging/aur/vidicon
+makepkg -si
+```
+
+It downloads the tagged release, builds it, and installs mpv, ffmpeg and
+Inter as dependencies. `packaging/aur/vidicon-git` builds the latest `main`
+instead.
+
+To build from source on any distribution, you need:
 
 - Rust 1.92 or newer, to build
 - mpv, for playback
