@@ -3,6 +3,9 @@ name = "vidicon"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+description = "A fast, keyboard-driven IPTV player for Linux"
+homepage = "https://github.com/emzbtw/vidicon"
+repository = "https://github.com/emzbtw/vidicon"
 
 [features]
 default = ["devtools"]
@@ -46,3 +49,42 @@ opt-level = 3
 # One cache key per font, so glyph hinting state is reused: vendor/README.md.
 [patch.crates-io]
 femtovg = { path = "vendor/femtovg" }
+
+# The .deb and .rpm on GitHub Releases (.github/workflows/release.yml). Built
+# with --no-default-features first, then packaged with --no-build. Besides
+# what the binary links, winit and femtovg load the EGL/GL, Wayland, X11
+# and xkbcommon libraries at runtime; mpv and ffmpeg run as programs.
+[package.metadata.deb]
+maintainer = "emz <307707176+emzbtw@users.noreply.github.com>"
+section = "video"
+depends = "$auto, libegl1, libgl1, libwayland-client0, libwayland-egl1, libxkbcommon0, libxkbcommon-x11-0, libx11-6, libx11-xcb1, libxcursor1, libxi6, mpv, ffmpeg, fonts-inter"
+assets = [
+  ["target/release/vidicon", "usr/bin/", "755"],
+  ["assets/vidicon.desktop", "usr/share/applications/", "644"],
+  ["assets/vidicon.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+  ["README.md", "usr/share/doc/vidicon/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+  { source = "target/release/vidicon", dest = "/usr/bin/vidicon", mode = "755" },
+  { source = "assets/vidicon.desktop", dest = "/usr/share/applications/vidicon.desktop", mode = "644" },
+  { source = "assets/vidicon.svg", dest = "/usr/share/icons/hicolor/scalable/apps/vidicon.svg", mode = "644" },
+  { source = "README.md", dest = "/usr/share/doc/vidicon/README.md", mode = "644", doc = true },
+  { source = "LICENSE", dest = "/usr/share/licenses/vidicon/LICENSE", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+"libEGL.so.1()(64bit)" = "*"
+"libGL.so.1()(64bit)" = "*"
+"libwayland-client.so.0()(64bit)" = "*"
+"libwayland-egl.so.1()(64bit)" = "*"
+"libxkbcommon.so.0()(64bit)" = "*"
+"libxkbcommon-x11.so.0()(64bit)" = "*"
+"libX11.so.6()(64bit)" = "*"
+"libX11-xcb.so.1()(64bit)" = "*"
+"libXcursor.so.1()(64bit)" = "*"
+"libXi.so.6()(64bit)" = "*"
+"/usr/bin/mpv" = "*"
+"/usr/bin/ffmpeg" = "*"
+rsms-inter-fonts = "*"

@@ -14,12 +14,11 @@ pkgbase = vidicon
 	depends = ffmpeg
 	depends = wayland
 	depends = libxkbcommon
+	depends = libxkbcommon-x11
 	depends = libglvnd
-	depends = vulkan-icd-loader
 	depends = libx11
 	depends = libxcursor
 	depends = libxi
-	depends = libxrandr
 	source = vidicon-0.1.0.tar.gz::https://github.com/emzbtw/vidicon/archive/v0.1.0.tar.gz
 	sha256sums = 328af7cc8f9676bc9af15f59bd6c17b3fc8afac54e76fcbdffa159f03dd897a6
 

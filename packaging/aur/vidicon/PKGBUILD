@@ -6,11 +6,11 @@ pkgdesc='A fast, keyboard-driven IPTV player for Linux'
 arch=('x86_64')
 url='https://github.com/emzbtw/vidicon'
 license=('GPL-3.0-or-later')
-# winit, femtovg and the GPU backends load the display and GL/Vulkan
+# winit and femtovg load the display, xkbcommon and EGL/GL
 # libraries at runtime; mpv and ffmpeg run as separate processes.
 depends=('gcc-libs' 'glibc' 'fontconfig' 'inter-font' 'mpv' 'ffmpeg'
-         'wayland' 'libxkbcommon' 'libglvnd' 'vulkan-icd-loader'
-         'libx11' 'libxcursor' 'libxi' 'libxrandr')
+         'wayland' 'libxkbcommon' 'libxkbcommon-x11' 'libglvnd'
+         'libx11' 'libxcursor' 'libxi')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('328af7cc8f9676bc9af15f59bd6c17b3fc8afac54e76fcbdffa159f03dd897a6')
