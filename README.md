@@ -25,7 +25,7 @@
 Vidicon browses an Xtream Codes provider's live channels, guide, movies and
 series, and plays them in mpv.
 
-![The main screen: categories, channels with what is on now, and the detail panel](docs/screenshots/main-guide.png)
+![Vidicon: browsing channels, searching, the guide grid and movies](docs/screenshots/demo.gif)
 
 Vidicon ships no channels, playlists or streams, and points to none. You
 bring your own provider account ([Disclaimer](#disclaimer)).

@@ -229,3 +229,12 @@ vidicon --play --screenshot docs/screenshots/main-guide.png \
   `uk<C-k>` removes a rule or kept tag again. This order of categories
   assumes provider order: `a` first only if the order is A–Z.
   Pad with `jkjkjkjkjkjk` after the last `<Enter>`, as above.
+
+`demo.gif`, at the top of the main README, is 22 screenshots, each a fresh
+launch with `--play` on a copy of the same data (favourites set, logos and
+posters cached), joined by `ffmpeg` with one 192-colour palette at 1200 px
+wide. Each frame's keys extend the last: 8 `jk` pairs; `j`, `jj`, `jjj`;
+`jjj<Enter>` and 6 `jk` pairs; `/` and `harbour` a letter at a time;
+`<Tab>` and 12 `<Down><Up>` pairs; `<Esc> t`; `l` three times; `<gt>`;
+`n`; `t`; `<Tab> jj` and 40 `jk` pairs. Holds run from 160 ms a letter to
+2.6 s.
