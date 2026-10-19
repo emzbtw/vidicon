@@ -46,7 +46,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Install packagers
-        run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.0
+        run: cargo install --locked cargo-deb@3.8.0 cargo-generate-rpm@0.21.1
 
       - name: Build
         run: cargo build --locked --release --no-default-features
