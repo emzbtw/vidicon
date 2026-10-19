@@ -51,8 +51,15 @@ jobs:
       - name: Build
         run: cargo build --locked --release --no-default-features
 
+      # As a normal user: root writes to read-only files, which breaks the
+      # tests that check the app refuses to.
       - name: Test
-        run: cargo test --locked --release --no-default-features
+        run: |
+          useradd -m tester
+          chmod a+x "$HOME"
+          chown -R tester . "$HOME/.cargo" "$HOME/.rustup"
+          runuser -u tester -- env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" \
+            cargo test --locked --release --no-default-features
 
       - name: Package
         run: |
