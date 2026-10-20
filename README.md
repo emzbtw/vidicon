@@ -232,6 +232,9 @@ Vidicon is a player. It ships no channels, playlists, streams or guide
 data, and points to no sources of them. It is not affiliated with any IPTV
 provider, or with Xtream Codes.
 
+The screenshots show a demo provider: the channels, programmes and posters
+in them are invented.
+
 You are responsible for having the right to watch what your provider
 streams. Issues asking where to find streams or providers are closed.
 
