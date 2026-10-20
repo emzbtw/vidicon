@@ -41,22 +41,36 @@ features, and is easier to find than a repo page.
   image.
 - **No real provider data**, as everywhere in the repo (AGENTS.md).
 
+## Settled
+
+- **README sections become pages through an Astro integration**
+  (`site/readme-pages.mjs`, ticket 02). In `astro:config:setup` it
+  splits `README.md` on `## ` headings and writes the pages to the
+  git-ignored `site/src/content/docs/docs/`, before Starlight's content
+  loader reads them; in dev an edit to the README restarts the server.
+  Chosen over a custom content loader: plain Markdown files go through
+  Starlight's normal pipeline, so `starlight-links-validator` checks them
+  and Astro's image pipeline serves the screenshots. Over a separate
+  pre-build script: it runs on every `astro build` and `astro dev`, with
+  no npm hook to forget.
+- **Pages, in sidebar order:** Install, First run, Keys, Reporting a bug,
+  Disclaimer. "What it does", "What it does not do", Credits and Licence
+  stay README-only or feed the landing page. The HTML header and intro
+  come before the first `## `, so no page has them.
+- **Rewrites:** an anchor to a README section becomes a link to its page,
+  an anchor to a subheading a link to that page's anchor; `###` headings
+  move up to `##` under the page title; `docs/screenshots/` image paths
+  become paths relative to the generated file, so Astro serves the
+  images from `_astro/` without a copy in `site/`.
+- **Link checking:** `starlight-links-validator` in the build. A broken
+  internal link or hash fails `npm run build`.
+
 ## Proposed (settle in the tickets)
 
-- How README sections become pages: a script run before `astro build`
-  that splits `README.md` on `## ` headings into a git-ignored folder of
-  Starlight pages, or a custom Astro content loader. The script is
-  simpler; a loader avoids generated files. Settle in ticket 02.
-- Which README sections become pages and in what sidebar order. A first
-  guess: Install, First run, Keys, Reporting a bug, Disclaimer.
-  "What it does" and Credits feed the landing page instead.
-- README anchors (`#keys`, `#disclaimer`) rewritten to page links, and
-  `docs/screenshots/` paths to the site's image paths.
 - Inter through Fontsource (OFL-1.1), matching the app's font, with
   Inter Display for headings.
 - Colours taken from the app's palette in `ui/app.slint`, so the site
   looks like the app.
-- Link checking with `starlight-links-validator` in the build.
 
 ## Later
 
