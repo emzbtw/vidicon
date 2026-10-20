@@ -76,6 +76,11 @@ features, and is easier to find than a repo page.
   section, imported from the generated docs page, not copied. The
   licence, credits and AI note sit in a footer override on every page.
 
+- **Feature cards:** the landing page has the demo GIF, then a card per
+  bullet of the README's "What it does", read at build time
+  (`site/src/components/Features.astro`). A card opens its screenshot in
+  a `<dialog>`; without script it links to the image. A bullet with no
+  card, or a card with no bullet, fails the build.
 - **Pointers to the site:** a "Website" link first in the README's
   centred link row, the repo's About box homepage set to the site, and a
   line in `docs/releasing.md` saying the site needs nothing at release

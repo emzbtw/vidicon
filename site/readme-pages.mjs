@@ -27,6 +27,22 @@ function sections(text) {
 	return out;
 }
 
+// The bullets of the README's "What it does" section, for the landing
+// page's feature cards, from the README's text. A bullet may wrap onto
+// indented lines.
+export function whatItDoes(text) {
+	const section = sections(text).find((s) => s.title === 'What it does');
+	if (!section) throw new Error('README.md has no "## What it does" section');
+	const bullets = [];
+	for (const { line, fenced } of section.lines) {
+		if (fenced) continue;
+		if (line.startsWith('- ')) bullets.push(line.slice(2).trim());
+		else if (bullets.length && line.startsWith('  ') && line.trim()) bullets[bullets.length - 1] += ` ${line.trim()}`;
+		else if (bullets.length && !line.trim()) break;
+	}
+	return bullets;
+}
+
 export function writeReadmePages() {
 	const all = sections(readFileSync(readme, 'utf8'));
 	const pages = PAGES.map((title) => {
