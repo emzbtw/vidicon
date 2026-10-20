@@ -5,6 +5,10 @@ tests, the .deb, .rpm and tarball, install tests, then the GitHub Release
 (created if the tag has none) with the files attached. Everything before
 the tag and the AUR files after it is by hand.
 
+The website (`site/`) redeploys on its own when `README.md`,
+`docs/screenshots/` or `site/` change on `main`; a release needs nothing
+for it.
+
 ## Steps
 
 1. **Bump the version** in `Cargo.toml` and `flake.nix` (both `version =

@@ -76,6 +76,11 @@ features, and is easier to find than a repo page.
   section, imported from the generated docs page, not copied. The
   licence, credits and AI note sit in a footer override on every page.
 
+- **Pointers to the site:** a "Website" link first in the README's
+  centred link row, the repo's About box homepage set to the site, and a
+  line in `docs/releasing.md` saying the site needs nothing at release
+  time (ticket 04).
+
 ## Later
 
 - Feature guides beyond the README (the settings file, EPG sources,

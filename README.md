@@ -16,6 +16,7 @@
 </p>
 
 <p align="center">
+  <a href="https://emzbtw.github.io/vidicon/">Website</a> ·
   <a href="#install">Install</a> ·
   <a href="#first-run">First run</a> ·
   <a href="#keys">Keys</a> ·
