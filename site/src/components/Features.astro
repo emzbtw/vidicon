@@ -43,9 +43,9 @@ for (const card of CARDS) {
 		features.map((f) => (
 			<li>
 				<a class="feature" href={f.image.src} data-dialog={f.id}>
+					<Image class="thumb" src={f.image} alt="" widths={[480, 960]} sizes="20rem" />
 					<strong>{f.title}</strong>
 					<span>{f.text}</span>
-					<span class="show">Show screenshot</span>
 				</a>
 				<dialog id={f.id} aria-label={f.title}>
 					<form method="dialog">
@@ -88,12 +88,24 @@ for (const card of CARDS) {
 		flex-direction: column;
 		gap: 0.375rem;
 		height: 100%;
-		padding: 1rem 1.25rem;
+		padding: 0 1.25rem 1rem;
+		overflow: hidden;
 		border: 1px solid var(--sl-color-gray-5);
 		border-radius: 0.5rem;
 		background: var(--sl-color-gray-6);
 		color: var(--sl-color-gray-2);
 		text-decoration: none;
+	}
+	/* A preview of the card's screenshot, cropped from its top left. */
+	.feature .thumb {
+		width: calc(100% + 2.5rem);
+		max-width: none;
+		height: auto;
+		aspect-ratio: 16 / 9;
+		margin: 0 -1.25rem 0.5rem;
+		object-fit: cover;
+		object-position: top left;
+		border-bottom: 1px solid var(--sl-color-gray-5);
 	}
 	.feature:hover,
 	.feature:focus-visible {
@@ -103,12 +115,6 @@ for (const card of CARDS) {
 		color: var(--sl-color-white);
 		font-size: var(--sl-text-lg);
 		font-variation-settings: 'opsz' 32;
-	}
-	.feature .show {
-		margin-top: auto;
-		padding-top: 0.25rem;
-		color: var(--sl-color-accent);
-		font-size: var(--sl-text-sm);
 	}
 	/* The dialog shrinks to the image, which fits the viewport's height. */
 	dialog {
