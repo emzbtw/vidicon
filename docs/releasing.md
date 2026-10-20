@@ -21,6 +21,12 @@ for it.
    `vidicon_amd64.deb`, `vidicon.x86_64.rpm`,
    `vidicon-X.Y.Z-x86_64-linux.tar.gz` and `SHA256SUMS`. The README links
    use `releases/latest/download` with fixed names, so it needs no edit.
+   The workflow creates the release without notes; write them with
+   `gh release edit vX.Y.Z --notes-file <file>`. Their Install section
+   gives the .deb, .rpm, Nix and tarball routes, with download links
+   pinned to `releases/download/vX.Y.Z/`, and links to the site's
+   [install guide](https://emzbtw.github.io/vidicon/docs/install/).
+   The v0.1.0 notes are the model.
 4. **Update the AUR packages**, now that the tag's archive exists:
    - `packaging/aur/vidicon/PKGBUILD`: `pkgver=X.Y.Z`, `pkgrel=1`, and
      `sha256sums` from
