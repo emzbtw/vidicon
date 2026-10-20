@@ -1,6 +1,6 @@
 # 02: Docs from the README
 
-Status: open. Blocked by: 01.
+Status: done. Blocked by: 01.
 
 ## Goal
 
@@ -31,7 +31,7 @@ Starlight's content collections docs.
 
 - [x] No README text exists in a committed file under `site/`.
 - [x] Editing a sentence in `README.md` and rebuilding changes the page.
-- [ ] Every link and image on the docs pages works on the deployed site;
+- [x] Every link and image on the docs pages works on the deployed site;
   the build fails on a broken one (tried once with a deliberately broken
   link).
 - [x] The README still renders as before on GitHub.
