@@ -1,0 +1,21 @@
+---
+// Starlight's footer, plus the licence, credits and AI note on every page.
+import Default from '@astrojs/starlight/components/Footer.astro';
+---
+
+<Default><slot /></Default>
+<p class="vidicon-footer">
+	Licensed <a href="https://github.com/emzbtw/vidicon/blob/main/LICENSE">GPL-3.0-or-later</a>.{' '}
+	<a href="https://github.com/emzbtw/vidicon#credits">Credits</a>.{' '}
+	Written with the help of AI coding assistants.
+</p>
+
+<style>
+	.vidicon-footer {
+		margin-top: 2rem;
+		padding-top: 1rem;
+		border-top: 1px solid var(--sl-color-hairline-light);
+		color: var(--sl-color-gray-3);
+		font-size: var(--sl-text-sm);
+	}
+</style>

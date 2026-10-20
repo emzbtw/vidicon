@@ -65,12 +65,16 @@ features, and is easier to find than a repo page.
 - **Link checking:** `starlight-links-validator` in the build. A broken
   internal link or hash fails `npm run build`.
 
-## Proposed (settle in the tickets)
-
-- Inter through Fontsource (OFL-1.1), matching the app's font, with
-  Inter Display for headings.
-- Colours taken from the app's palette in `ui/app.slint`, so the site
-  looks like the app.
+- **Font:** Inter through `@fontsource-variable/inter` (OFL-1.1),
+  self-hosted. Its `opsz` axis set to 32 on headings gives Inter
+  Display, so one package covers both (ticket 03).
+- **Colours:** dark mode is the app's palette from `ui/app.slint` mapped
+  onto Starlight's colour tokens in `site/src/styles/theme.css`; light
+  mode inverts the same greys and darkens the accent for contrast. The
+  app has no light theme to copy (ticket 03).
+- **Landing page:** the disclaimer on it is the README's Disclaimer
+  section, imported from the generated docs page, not copied. The
+  licence, credits and AI note sit in a footer override on every page.
 
 ## Later
 

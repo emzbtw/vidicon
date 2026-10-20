@@ -13,6 +13,8 @@ export default defineConfig({
 		starlight({
 			title: 'Vidicon',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/emzbtw/vidicon' }],
+			customCss: ['@fontsource-variable/inter/opsz.css', './src/styles/theme.css'],
+			components: { Footer: './src/components/Footer.astro' },
 			sidebar: [{ label: 'Docs', items: [{ autogenerate: { directory: 'docs' } }] }],
 			// A broken internal link fails the build.
 			plugins: [starlightLinksValidator()],

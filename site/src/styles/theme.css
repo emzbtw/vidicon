@@ -1,0 +1,48 @@
+/* Inter, self-hosted through Fontsource. The opsz axis gives Inter Display
+   at heading sizes, as in the app. Colours come from Palette in ui/app.slint. */
+:root {
+	--sl-font: 'Inter Variable';
+
+	/* Dark: the app's own palette. */
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #e7e9ee; /* text */
+	--sl-color-gray-2: #c9cedb;
+	--sl-color-gray-3: #8b93a4; /* dim */
+	--sl-color-gray-4: #545b69;
+	--sl-color-gray-5: #262c37; /* line */
+	--sl-color-gray-6: #151920; /* surface */
+	--sl-color-black: #0e1014; /* bg */
+
+	--sl-color-accent-low: #1f2a4d;
+	--sl-color-accent: #7c9cff; /* accent */
+	--sl-color-accent-high: #c5d3ff;
+}
+
+/* Light: the same hues, inverted. The app has no light theme. */
+:root[data-theme='light'] {
+	--sl-color-white: #0e1014;
+	--sl-color-gray-1: #151920;
+	--sl-color-gray-2: #262c37;
+	--sl-color-gray-3: #4b5262;
+	--sl-color-gray-4: #8b93a4;
+	--sl-color-gray-5: #c9cedb;
+	--sl-color-gray-6: #e7e9ee;
+	--sl-color-gray-7: #f3f4f7;
+	--sl-color-black: #ffffff;
+
+	--sl-color-accent-low: #d9e2ff;
+	--sl-color-accent: #4f6fe6;
+	--sl-color-accent-high: #2e4bb0;
+}
+
+h1,
+h2,
+h3,
+.site-title {
+	font-variation-settings: 'opsz' 32;
+}
+
+/* The app icon, at icon size rather than as a hero illustration. */
+.hero > img {
+	width: min(12rem, 50vw);
+}
