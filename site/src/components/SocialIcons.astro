@@ -1,0 +1,18 @@
+---
+// Starlight's social icons, after a "Releases" text link.
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+---
+
+<a class="releases" href="https://github.com/emzbtw/vidicon/releases">Releases</a>
+<Default />
+
+<style>
+	.releases {
+		color: var(--sl-color-text-accent);
+		font-size: var(--sl-text-sm);
+		text-decoration: none;
+	}
+	.releases:hover {
+		color: var(--sl-color-white);
+	}
+</style>

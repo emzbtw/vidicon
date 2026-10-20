@@ -14,7 +14,7 @@ export default defineConfig({
 			title: 'Vidicon',
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/emzbtw/vidicon' }],
 			customCss: ['@fontsource-variable/inter/opsz.css', './src/styles/theme.css'],
-			components: { Footer: './src/components/Footer.astro' },
+			components: { Footer: './src/components/Footer.astro', SocialIcons: './src/components/SocialIcons.astro' },
 			sidebar: [{ label: 'Docs', items: [{ autogenerate: { directory: 'docs' } }] }],
 			// A broken internal link fails the build.
 			plugins: [starlightLinksValidator()],
