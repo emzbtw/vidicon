@@ -20,13 +20,17 @@ const partialsDir = join(siteDir, 'src', 'generated');
 
 // Split the README into `## ` sections, skipping fenced code blocks.
 // The HTML header and intro come before the first `## ` and are dropped.
-function sections(text) {
+// A fence may be indented (inside a list item) and use backticks or
+// tildes; only a fence of the same character closes it.
+export function sections(text) {
 	const out = [];
-	let fenced = false;
+	let fence = null;
 	for (const line of text.split('\n')) {
-		if (line.startsWith('```')) fenced = !fenced;
-		if (!fenced && line.startsWith('## ')) out.push({ title: line.slice(3).trim(), lines: [] });
-		else if (out.length) out.at(-1).lines.push({ line, fenced: fenced || line.startsWith('```') });
+		const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1][0];
+		const fenceLine = Boolean(marker && (!fence || marker === fence));
+		if (fenceLine) fence = fence ? null : marker;
+		if (!fence && !fenceLine && line.startsWith('## ')) out.push({ title: line.slice(3).trim(), lines: [] });
+		else if (out.length) out.at(-1).lines.push({ line, fenced: Boolean(fence) || fenceLine });
 	}
 	return out;
 }
@@ -47,6 +51,30 @@ export function whatItDoes(text) {
 	return bullets;
 }
 
+// Where each README anchor lives on the site: a section is its page,
+// a subheading is an anchor on its section's page. GitHub slugs the whole
+// README at once, so a repeated heading gets `-1` there; Starlight slugs
+// each page on its own, so the same heading has no suffix on its page.
+export function anchorMap(all, pages) {
+	const anchors = new Map();
+	const readmeSlugger = new GithubSlugger();
+	for (const s of all) {
+		const page = pages.find((p) => p.title === s.title);
+		const pageSlugger = new GithubSlugger();
+		const anchor = readmeSlugger.slug(s.title);
+		if (page) anchors.set(anchor, { page: page.slug });
+		for (const { line, fenced } of s.lines) {
+			const h = !fenced && line.match(/^#{3,} (.*)/);
+			if (h) {
+				const sub = readmeSlugger.slug(h[1].trim());
+				const hash = pageSlugger.slug(h[1].trim());
+				if (page) anchors.set(sub, { page: page.slug, hash });
+			}
+		}
+	}
+	return anchors;
+}
+
 export function writeReadmePages() {
 	const all = sections(readFileSync(readme, 'utf8'));
 	const pages = PAGES.map((title) => {
@@ -55,22 +83,7 @@ export function writeReadmePages() {
 		return { ...section, slug: new GithubSlugger().slug(title) };
 	});
 
-	// Where each README anchor lives on the site: a section is its page,
-	// a subheading is an anchor on its section's page.
-	const anchors = new Map();
-	const slugger = new GithubSlugger();
-	for (const s of all) {
-		const page = pages.find((p) => p.title === s.title);
-		const anchor = slugger.slug(s.title);
-		if (page) anchors.set(anchor, { page: page.slug });
-		for (const { line, fenced } of s.lines) {
-			const h = !fenced && line.match(/^#{3,} (.*)/);
-			if (h) {
-				const sub = slugger.slug(h[1].trim());
-				if (page) anchors.set(sub, { page: page.slug, hash: sub });
-			}
-		}
-	}
+	const anchors = anchorMap(all, pages);
 
 	// A section's Markdown with its links rewritten for the site; `page.slug`
 	// is the page it lands on, and `dir` the directory its file is written to.

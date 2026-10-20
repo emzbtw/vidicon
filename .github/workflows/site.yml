@@ -1,6 +1,6 @@
 # Builds the website in site/ and deploys it to GitHub Pages at
-# https://emzbtw.github.io/vidicon/. The site reads README.md and
-# docs/screenshots/, so a change to either redeploys it too.
+# https://emzbtw.github.io/vidicon/. The site reads README.md,
+# docs/screenshots/ and assets/, so a change to any of them redeploys it too.
 name: Website
 
 on:
@@ -10,13 +10,12 @@ on:
       - 'site/**'
       - 'README.md'
       - 'docs/screenshots/**'
+      - 'assets/**'
       - '.github/workflows/site.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # One deploy at a time; a newer push replaces a queued one.
 concurrency:
@@ -33,6 +32,8 @@ jobs:
       ASTRO_TELEMETRY_DISABLED: 1
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # The devShell's major version (flake.nix, pkgs.nodejs).
       - uses: actions/setup-node@v7
@@ -42,6 +43,7 @@ jobs:
           cache-dependency-path: site/package-lock.json
 
       - run: npm ci
+      - run: npm test
       - run: npm run build
 
       - uses: actions/upload-pages-artifact@v5
@@ -51,6 +53,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Only the deploy job can publish; the build job runs npm packages.
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

@@ -6,8 +6,8 @@ tests, the .deb, .rpm and tarball, install tests, then the GitHub Release
 the tag and the AUR files after it is by hand.
 
 The website (`site/`) redeploys on its own when `README.md`,
-`docs/screenshots/` or `site/` change on `main`; a release needs nothing
-for it.
+`docs/screenshots/`, `assets/` or `site/` change on `main`; a release
+needs nothing for it.
 
 ## Steps
 

@@ -35,8 +35,10 @@ features, and is easier to find than a repo page.
   and the AUR builds stay untouched: the flake's `fileset` lists its
   sources, and the PKGBUILDs build with cargo only.
 - **Deploy by GitHub Actions** (`.github/workflows/site.yml`): on pushes
-  to `main` that touch `site/`, `README.md` or `docs/screenshots/`, and by
-  hand. Pages' source is set to GitHub Actions.
+  to `main` that touch `site/`, `README.md`, `docs/screenshots/` or
+  `assets/` (the icon), and by hand. Pages' source is set to GitHub
+  Actions. Only the deploy job holds `pages: write` and `id-token: write`;
+  the build job, which runs npm packages, reads the repo only.
 - **Works at phone width and in light and dark**, with alt text on every
   image.
 - **No real provider data**, as everywhere in the repo (AGENTS.md).
@@ -54,14 +56,20 @@ features, and is easier to find than a repo page.
   pre-build script: it runs on every `astro build` and `astro dev`, with
   no npm hook to forget.
 - **Pages, in sidebar order:** Install, First run, Keys, Reporting a bug,
-  Disclaimer. "What it does", "What it does not do", Credits and Licence
-  stay README-only or feed the landing page. The HTML header and intro
-  come before the first `## `, so no page has them.
+  Disclaimer. "What it does" feeds the feature cards and "What it does
+  not do" is written to the git-ignored `site/src/generated/` as a
+  partial for the landing page; neither has a page. Credits and Licence
+  stay README-only. The HTML header and intro come before the first
+  `## `, so no page has them.
 - **Rewrites:** an anchor to a README section becomes a link to its page,
-  an anchor to a subheading a link to that page's anchor; `###` headings
-  move up to `##` under the page title; `docs/screenshots/` image paths
-  become paths relative to the generated file, so Astro serves the
-  images from `_astro/` without a copy in `site/`.
+  an anchor to a subheading a link to that page's anchor (slugged per
+  page, as Starlight does, so a heading repeated across the README loses
+  GitHub's `-1` suffix); `###` headings move up to `##` under the page
+  title; `docs/screenshots/` image paths become paths relative to the
+  generated file, so Astro serves the images from `_astro/` without a
+  copy in `site/`; any other relative link points to the file on GitHub,
+  since it has no page on the site. Fenced code blocks, indented or with
+  tildes, are left alone. `npm test` covers the splitting and anchors.
 - **Link checking:** `starlight-links-validator` in the build. A broken
   internal link or hash fails `npm run build`.
 
@@ -74,13 +82,17 @@ features, and is easier to find than a repo page.
   app has no light theme to copy (ticket 03).
 - **Landing page:** the disclaimer on it is the README's Disclaimer
   section, imported from the generated docs page, not copied. The
-  licence, credits and AI note sit in a footer override on every page.
+  licence, credits and AI note sit in a footer override on every page,
+  and a "Releases" link to the GitHub releases sits before the social
+  icons in the header. Below the feature cards, "What it does not do"
+  is the README's section, imported from its generated partial.
 
 - **Feature cards:** the landing page has the demo GIF, then a card per
   bullet of the README's "What it does", read at build time
   (`site/src/components/Features.astro`). A card opens its screenshot in
   a `<dialog>`; without script it links to the image. A bullet with no
-  card, or a card with no bullet, fails the build.
+  card, or a card with no bullet, fails the build. Ticket 03's player
+  screenshot was dropped: no bullet is about the player.
 - **Pointers to the site:** a "Website" link first in the README's
   centred link row, the repo's About box homepage set to the site, and a
   line in `docs/releasing.md` saying the site needs nothing at release

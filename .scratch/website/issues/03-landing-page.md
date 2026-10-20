@@ -20,7 +20,9 @@ Disclaimer, Credits), `docs/screenshots/`, `assets/vidicon.svg`,
 - The demo GIF, then a short feature tour with screenshots from
   `docs/screenshots/` (main screen, search, guide grid, movies, player).
   Feature wording from the README's "What it does" where it fits; any
-  new text stays short.
+  new text stays short. The player screenshot was dropped (2026-10-20):
+  the tour became a card per "What it does" bullet, and no bullet is
+  about the player.
 - The disclaimer visible on the page: no channels, playlists or streams
   shipped or pointed to; bring your own provider.
 - Footer: licence (GPL-3.0-or-later), credits link, "written with the
