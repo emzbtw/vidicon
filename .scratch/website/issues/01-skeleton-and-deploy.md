@@ -1,6 +1,6 @@
 # 01: Skeleton and deploy
 
-Status: open. Blocked by: none.
+Status: done. Blocked by: none.
 
 ## Goal
 
@@ -35,10 +35,10 @@ workflow style.
 
 ## Acceptance
 
-- [ ] `npm run build` passes in the devShell, from a clean `site/`.
-- [ ] The workflow run is green and the URL serves the placeholder pages,
+- [x] `npm run build` passes in the devShell, from a clean `site/`.
+- [x] The workflow run is green and the URL serves the placeholder pages,
   with working links and assets under `/vidicon/`.
-- [ ] `nix build` still works, and its source does not include `site/`.
+- [x] `nix build` still works, and its source does not include `site/`.
 
 ## Out of scope
 
