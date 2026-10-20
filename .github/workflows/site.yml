@@ -1,6 +1,7 @@
 # Builds the website in site/ and deploys it to GitHub Pages at
 # https://emzbtw.github.io/vidicon/. The site reads README.md,
-# docs/screenshots/ and assets/, so a change to any of them redeploys it too.
+# docs/screenshots/ and assets/, so a change to any of them redeploys it too,
+# and shows Cargo.toml's version, so a version bump does.
 name: Website
 
 on:
@@ -11,6 +12,7 @@ on:
       - 'README.md'
       - 'docs/screenshots/**'
       - 'assets/**'
+      - 'Cargo.toml'
       - '.github/workflows/site.yml'
   workflow_dispatch:
 

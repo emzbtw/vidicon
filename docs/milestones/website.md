@@ -36,7 +36,7 @@ features, and is easier to find than a repo page.
   sources, and the PKGBUILDs build with cargo only.
 - **Deploy by GitHub Actions** (`.github/workflows/site.yml`): on pushes
   to `main` that touch `site/`, `README.md`, `docs/screenshots/` or
-  `assets/` (the icon), and by hand. Pages' source is set to GitHub
+  `assets/` (the icon) or `Cargo.toml` (the version), and by hand. Pages' source is set to GitHub
   Actions. Only the deploy job holds `pages: write` and `id-token: write`;
   the build job, which runs npm packages, reads the repo only.
 - **Works at phone width and in light and dark**, with alt text on every
@@ -82,7 +82,8 @@ features, and is easier to find than a repo page.
   app has no light theme to copy (ticket 03).
 - **Landing page:** the disclaimer on it is the README's Disclaimer
   section, imported from the generated docs page, not copied. The
-  licence, credits and AI note sit in a footer override on every page,
+  version (read from `Cargo.toml`, linking to its release), licence,
+  credits and AI note sit in a footer override on every page,
   and a "Releases" link to the GitHub releases sits before the social
   icons in the header. Below the feature cards, "What it does not do"
   is the README's section, imported from its generated partial.
