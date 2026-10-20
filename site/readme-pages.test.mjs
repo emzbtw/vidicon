@@ -21,6 +21,13 @@ test('a repeated subheading links to the anchor its own page gives it', () => {
 	assert.deepEqual(anchors.get('notes-1'), { page: 'keys', hash: 'notes' });
 });
 
+test('a raw <img> of a repo file fails, one in a code span does not', () => {
+	const [page] = sections(['## Install', '`<img src="a.png">`', '<img src="https://example.com/a.png">'].join('\n'));
+	assert.doesNotThrow(() => sectionMarkdown({ ...page, slug: 'install' }, new Map(), '..'));
+	page.lines.push({ line: '<img src="docs/screenshots/a.png" alt="">', fenced: false });
+	assert.throws(() => sectionMarkdown({ ...page, slug: 'install' }, new Map(), '..'), /<img>/);
+});
+
 test('links and images are rewritten outside code spans, keeping titles', () => {
 	const [page] = sections(
 		[

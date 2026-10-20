@@ -10,8 +10,9 @@ import GithubSlugger from 'github-slugger';
 // README `## ` headings that become pages, in sidebar order.
 const PAGES = ['Install', 'First run', 'Keys', 'Reporting a bug', 'Disclaimer'];
 // README `## ` headings written to src/generated/ (git-ignored) as partials
-// for the landing page to import, with no page of their own.
-const PARTIALS = ['What it does not do'];
+// for the landing page to import. A partial is on no docs page, so its
+// anchor links all point to pages.
+const PARTIALS = ['Disclaimer', 'What it does not do'];
 
 const siteDir = dirname(fileURLToPath(import.meta.url));
 const readme = join(siteDir, '..', 'README.md');
@@ -98,11 +99,16 @@ export function sectionMarkdown(page, anchors, repoRoot) {
 			if (fenced) return line;
 			// Code spans are set aside, so a `](` inside one is not a link.
 			const spans = [];
+			const text = line.replace(/`[^`]*`/g, (span) => `\0${spans.push(span) - 1}\0`);
+			// Astro serves Markdown images only, so a raw `<img>` of a repo
+			// file would show nothing on the site.
+			if (/<img\b[^>]*\bsrc="(?![a-z][a-z+.-]*:|\/)/i.test(text)) {
+				throw new Error(`README section "${page.title}" has an <img> of a repo file; use ![alt](path) there`);
+			}
 			return (
-				line
+				text
 					// The page title is the h1, so `###` becomes `##`.
 					.replace(/^#(#{2,}) /, '$1 ')
-					.replace(/`[^`]*`/g, (span) => `\0${spans.push(span) - 1}\0`)
 					// `![alt` is kept to tell an image from a link; a title after
 					// the target stays outside it.
 					.replace(/(!\[[^\]]*)?\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (_, image = '', url, title = '') => `${image}](${target(url, image)}${title})`)
@@ -115,11 +121,13 @@ export function sectionMarkdown(page, anchors, repoRoot) {
 
 export function writeReadmePages() {
 	const all = sections(readFileSync(readme, 'utf8'));
-	const pages = PAGES.map((title) => {
+	// The README section with this title, and the slug of its file.
+	const named = (title) => {
 		const section = all.find((s) => s.title === title);
 		if (!section) throw new Error(`README.md has no "## ${title}" section`);
 		return { ...section, slug: new GithubSlugger().slug(title) };
-	});
+	};
+	const pages = PAGES.map(named);
 
 	const anchors = anchorMap(all, pages);
 
@@ -137,10 +145,8 @@ export function writeReadmePages() {
 	rmSync(partialsDir, { recursive: true, force: true });
 	mkdirSync(partialsDir, { recursive: true });
 	for (const title of PARTIALS) {
-		const section = all.find((s) => s.title === title);
-		if (!section) throw new Error(`README.md has no "## ${title}" section`);
-		const slug = new GithubSlugger().slug(title);
-		writeFileSync(join(partialsDir, `${slug}.md`), `<!-- Generated from README.md by site/readme-pages.mjs. Edit the README. -->\n\n${body({ ...section, slug }, partialsDir)}\n`);
+		const partial = named(title);
+		writeFileSync(join(partialsDir, `${partial.slug}.md`), `<!-- Generated from README.md by site/readme-pages.mjs. Edit the README. -->\n\n${body({ ...partial, slug: null }, partialsDir)}\n`);
 	}
 }
 

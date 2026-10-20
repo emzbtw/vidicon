@@ -56,9 +56,11 @@ features, and is easier to find than a repo page.
   pre-build script: it runs on every `astro build` and `astro dev`, with
   no npm hook to forget.
 - **Pages, in sidebar order:** Install, First run, Keys, Reporting a bug,
-  Disclaimer. "What it does" feeds the feature cards and "What it does
-  not do" is written to the git-ignored `site/src/generated/` as a
-  partial for the landing page; neither has a page. Credits and Licence
+  Disclaimer. "What it does" feeds the feature cards; "What it does not
+  do" and the Disclaimer are written to the git-ignored
+  `site/src/generated/` as partials for the landing page, where every
+  anchor link points to its page. "What it does" and "What it does not
+  do" have no page. Credits and Licence
   stay README-only. The HTML header and intro come before the first
   `## `, so no page has them.
 - **Rewrites:** an anchor to a README section becomes a link to its page,
@@ -70,7 +72,9 @@ features, and is easier to find than a repo page.
   `_astro/` without a copy in `site/`; any other relative link points to
   the file on GitHub, since it has no page on the site. A link title
   stays after its target. Fenced code blocks, indented or with tildes,
-  and code spans are left alone. `npm test` covers the splitting,
+  and code spans are left alone. A raw `<img>` of a repo file in a
+  generated section fails the build, since only Markdown images are
+  served. `npm test` covers the splitting,
   anchors and rewrites.
 - **Link checking:** `starlight-links-validator` in the build. A broken
   internal link or hash fails `npm run build`.
@@ -83,7 +87,7 @@ features, and is easier to find than a repo page.
   mode inverts the same greys and darkens the accent for contrast. The
   app has no light theme to copy (ticket 03).
 - **Landing page:** the disclaimer on it is the README's Disclaimer
-  section, imported from the generated docs page, not copied. The
+  section, imported from its generated partial, not copied. The
   version (read from `Cargo.toml`, linking to its release), licence,
   credits and AI note sit in a footer override on every page,
   and a "Releases" link to the GitHub releases sits before the social
