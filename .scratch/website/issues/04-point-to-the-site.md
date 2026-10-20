@@ -1,6 +1,6 @@
 # 04: Point to the site
 
-Status: open. Blocked by: 02, 03.
+Status: done. Blocked by: 02, 03.
 
 ## Goal
 
@@ -24,8 +24,8 @@ The README, the repo page and the release docs lead to the site.
 
 ## Acceptance
 
-- [ ] The repo page's About box links to the site.
-- [ ] The README link opens the deployed site.
+- [x] The repo page's About box links to the site.
+- [x] The README link opens the deployed site.
 
 ## Out of scope
 
