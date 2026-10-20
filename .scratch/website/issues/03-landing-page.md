@@ -1,6 +1,6 @@
 # 03: Landing page
 
-Status: open. Blocked by: 01.
+Status: done. Blocked by: 01.
 
 ## Goal
 
@@ -31,10 +31,10 @@ Disclaimer, Credits), `docs/screenshots/`, `assets/vidicon.svg`,
 
 ## Acceptance
 
-- [ ] Checked by screenshots of the deployed page at 375 px and desktop
+- [x] Checked by screenshots of the deployed page at 375 px and desktop
   width, light and dark.
-- [ ] Every image has alt text, and every image shows invented data only.
-- [ ] The browser's network panel shows no request outside
+- [x] Every image has alt text, and every image shows invented data only.
+- [x] The browser's network panel shows no request outside
   `emzbtw.github.io`.
 
 ## Out of scope
