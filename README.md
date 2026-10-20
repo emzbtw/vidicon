@@ -65,9 +65,9 @@ filters in under 8 ms a keystroke.
 ## What it does not do
 
 - **M3U playlists or Stalker portals.** Xtream Codes is the only source
-  (`docs/adr/0001-xtream-only-source.md`).
+  ([`docs/adr/0001-xtream-only-source.md`](docs/adr/0001-xtream-only-source.md)).
 - **Play video itself.** mpv opens in its own window, driven over its IPC
-  socket (`docs/adr/0002-external-mpv-over-ipc.md`).
+  socket ([`docs/adr/0002-external-mpv-over-ipc.md`](docs/adr/0002-external-mpv-over-ipc.md)).
 - Windows, macOS, mobile or TV.
 
 ## Install

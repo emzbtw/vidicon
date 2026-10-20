@@ -1,10 +1,16 @@
 ---
 // Starlight's footer, plus the licence, credits and AI note on every page.
 import Default from '@astrojs/starlight/components/Footer.astro';
+import cargo from '../../../Cargo.toml?raw';
+
+// The package version, which a release tags as vX.Y.Z.
+const version = cargo.match(/^version = "(.+)"/m)?.[1];
+if (!version) throw new Error('Cargo.toml has no version line');
 ---
 
 <Default><slot /></Default>
 <p class="vidicon-footer">
+	<a href={`https://github.com/emzbtw/vidicon/releases/tag/v${version}`}>Vidicon {version}</a>.{' '}
 	Licensed <a href="https://github.com/emzbtw/vidicon/blob/main/LICENSE">GPL-3.0-or-later</a>.{' '}
 	<a href="https://github.com/emzbtw/vidicon#credits">Credits</a>.{' '}
 	Written with the help of AI coding assistants.

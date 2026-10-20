@@ -9,10 +9,14 @@ import GithubSlugger from 'github-slugger';
 
 // README `## ` headings that become pages, in sidebar order.
 const PAGES = ['Install', 'First run', 'Keys', 'Reporting a bug', 'Disclaimer'];
+// README `## ` headings written to src/generated/ (git-ignored) as partials
+// for the landing page to import, with no page of their own.
+const PARTIALS = ['What it does not do'];
 
 const siteDir = dirname(fileURLToPath(import.meta.url));
 const readme = join(siteDir, '..', 'README.md');
 const outDir = join(siteDir, 'src', 'content', 'docs', 'docs');
+const partialsDir = join(siteDir, 'src', 'generated');
 
 // Split the README into `## ` sections, skipping fenced code blocks.
 // The HTML header and intro come before the first `## ` and are dropped.
@@ -68,11 +72,11 @@ export function writeReadmePages() {
 		}
 	}
 
-	rmSync(outDir, { recursive: true, force: true });
-	mkdirSync(outDir, { recursive: true });
-	const repoRoot = relative(outDir, join(siteDir, '..'));
-	pages.forEach((page, i) => {
-		const body = page.lines
+	// A section's Markdown with its links rewritten for the site; `page.slug`
+	// is the page it lands on, and `dir` the directory its file is written to.
+	const body = (page, dir) => {
+		const repoRoot = relative(dir, join(siteDir, '..'));
+		return page.lines
 			.map(({ line, fenced }) => {
 				if (fenced) return line;
 				return (
@@ -86,13 +90,29 @@ export function writeReadmePages() {
 							return `](/vidicon/docs/${target.page}/${target.hash ? `#${target.hash}` : ''})`;
 						})
 						.replace(/\]\((docs\/screenshots\/[^)]+)\)/g, (_, path) => `](${repoRoot}/${path})`)
+						// Any other repo file has no page on the site: link to it on GitHub.
+						.replace(/\]\((?![a-z][a-z+.-]*:|[#/]|\.\.\/)([^)]+)\)/g, (_, path) => `](https://github.com/emzbtw/vidicon/blob/main/${path})`)
 				);
 			})
 			.join('\n')
 			.trim();
+	};
+
+	rmSync(outDir, { recursive: true, force: true });
+	mkdirSync(outDir, { recursive: true });
+	pages.forEach((page, i) => {
 		const frontmatter = `---\ntitle: ${JSON.stringify(page.title)}\nsidebar:\n  order: ${i + 1}\n---\n\n`;
-		writeFileSync(join(outDir, `${page.slug}.md`), `${frontmatter}<!-- Generated from README.md by site/readme-pages.mjs. Edit the README. -->\n\n${body}\n`);
+		writeFileSync(join(outDir, `${page.slug}.md`), `${frontmatter}<!-- Generated from README.md by site/readme-pages.mjs. Edit the README. -->\n\n${body(page, outDir)}\n`);
 	});
+
+	rmSync(partialsDir, { recursive: true, force: true });
+	mkdirSync(partialsDir, { recursive: true });
+	for (const title of PARTIALS) {
+		const section = all.find((s) => s.title === title);
+		if (!section) throw new Error(`README.md has no "## ${title}" section`);
+		const slug = new GithubSlugger().slug(title);
+		writeFileSync(join(partialsDir, `${slug}.md`), `<!-- Generated from README.md by site/readme-pages.mjs. Edit the README. -->\n\n${body({ ...section, slug }, partialsDir)}\n`);
+	}
 }
 
 export default function readmePages() {
