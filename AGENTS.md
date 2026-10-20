@@ -30,6 +30,8 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
   the players this one is reacting against.
 - `docs/releasing.md`: releasing a version (bump, tag, AUR) and keeping the
   release CI's install tests current. Read it before any version bump.
+- `site/`: the website (Astro and Starlight), deployed to
+  `https://emzbtw.github.io/vidicon/` by `.github/workflows/site.yml`.
 
 ## Settled
 
@@ -80,6 +82,9 @@ The Rust toolchain (`cargo`, `rustc`, `clippy`, `rustfmt`, `rust-analyzer`)
 comes from this flake's devShell, not from the system. The shell also sets
 `LD_LIBRARY_PATH` for the Wayland, xkbcommon, Vulkan, GL and fontconfig
 libraries that winit loads at runtime.
+
+`node` and `npm` for the website also come from the devShell. The site
+builds with `cd site && npm ci && npm run build`, into `site/dist/`.
 
 Dev tooling (`devtools` cargo feature, on by default): `--screenshot <path>`
 saves a PNG of the window after the first frame and exits; `--keys "<seq>"`

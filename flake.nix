@@ -84,6 +84,8 @@
         pkgs.pkg-config
         # The demo provider's streams (tools/demo/).
         pkgs.ffmpeg
+        # The website (site/).
+        pkgs.nodejs
       ];
       buildInputs = runtimeLibs;
       LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
