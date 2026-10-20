@@ -65,11 +65,13 @@ features, and is easier to find than a repo page.
   an anchor to a subheading a link to that page's anchor (slugged per
   page, as Starlight does, so a heading repeated across the README loses
   GitHub's `-1` suffix); `###` headings move up to `##` under the page
-  title; `docs/screenshots/` image paths become paths relative to the
-  generated file, so Astro serves the images from `_astro/` without a
-  copy in `site/`; any other relative link points to the file on GitHub,
-  since it has no page on the site. Fenced code blocks, indented or with
-  tildes, are left alone. `npm test` covers the splitting and anchors.
+  title; repo image paths (`docs/screenshots/`, `assets/`) become paths
+  relative to the generated file, so Astro serves the images from
+  `_astro/` without a copy in `site/`; any other relative link points to
+  the file on GitHub, since it has no page on the site. A link title
+  stays after its target. Fenced code blocks, indented or with tildes,
+  and code spans are left alone. `npm test` covers the splitting,
+  anchors and rewrites.
 - **Link checking:** `starlight-links-validator` in the build. A broken
   internal link or hash fails `npm run build`.
 
@@ -92,7 +94,8 @@ features, and is easier to find than a repo page.
   bullet of the README's "What it does", read at build time
   (`site/src/components/Features.astro`). A card opens its screenshot in
   a `<dialog>`; without script it links to the image. A bullet with no
-  card, or a card with no bullet, fails the build. Ticket 03's player
+  card, a card with no bullet, or a bullet with Markdown or HTML (a card
+  shows plain text and is itself a link) fails the build. Ticket 03's player
   screenshot was dropped: no bullet is about the player.
 - **Pointers to the site:** a "Website" link first in the README's
   centred link row, the repo's About box homepage set to the site, and a

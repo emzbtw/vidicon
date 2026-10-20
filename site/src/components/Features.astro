@@ -24,6 +24,9 @@ const CARDS = [
 ];
 
 const features = whatItDoes(readme).map((text, i) => {
+	// A card prints the bullet as text, and is itself a link, so Markdown
+	// or HTML in a bullet fails the build rather than showing as symbols.
+	if (/[*_`[\]<]/.test(text)) throw new Error(`README bullet "${text}" has Markdown or HTML; feature cards show plain text`);
 	const card = CARDS.find((c) => text.startsWith(c.starts));
 	if (!card) throw new Error(`No feature card for README bullet "${text}"`);
 	const image = shots[`../../../docs/screenshots/${card.shot}`];

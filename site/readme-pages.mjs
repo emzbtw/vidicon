@@ -75,6 +75,44 @@ export function anchorMap(all, pages) {
 	return anchors;
 }
 
+// A section's Markdown with its links rewritten for the site. `page.slug`
+// is the page it lands on, and `repoRoot` the repo root relative to the
+// generated file.
+export function sectionMarkdown(page, anchors, repoRoot) {
+	const target = (url, image) => {
+		if (url.startsWith('#')) {
+			const t = anchors.get(url.slice(1));
+			if (!t) return url;
+			if (t.page === page.slug && t.hash) return `#${t.hash}`;
+			return `/vidicon/docs/${t.page}/${t.hash ? `#${t.hash}` : ''}`;
+		}
+		if (/^([a-z][a-z+.-]*:|\/|\.\.\/)/i.test(url)) return url;
+		// A repo image is served by Astro from its path relative to the
+		// generated file, without a copy in site/.
+		if (image) return `${repoRoot}/${url}`;
+		// Any other repo file has no page on the site: link to it on GitHub.
+		return `https://github.com/emzbtw/vidicon/blob/main/${url}`;
+	};
+	return page.lines
+		.map(({ line, fenced }) => {
+			if (fenced) return line;
+			// Code spans are set aside, so a `](` inside one is not a link.
+			const spans = [];
+			return (
+				line
+					// The page title is the h1, so `###` becomes `##`.
+					.replace(/^#(#{2,}) /, '$1 ')
+					.replace(/`[^`]*`/g, (span) => `\0${spans.push(span) - 1}\0`)
+					// `![alt` is kept to tell an image from a link; a title after
+					// the target stays outside it.
+					.replace(/(!\[[^\]]*)?\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (_, image = '', url, title = '') => `${image}](${target(url, image)}${title})`)
+					.replace(/\0(\d+)\0/g, (_, i) => spans[i])
+			);
+		})
+		.join('\n')
+		.trim();
+}
+
 export function writeReadmePages() {
 	const all = sections(readFileSync(readme, 'utf8'));
 	const pages = PAGES.map((title) => {
@@ -85,31 +123,9 @@ export function writeReadmePages() {
 
 	const anchors = anchorMap(all, pages);
 
-	// A section's Markdown with its links rewritten for the site; `page.slug`
-	// is the page it lands on, and `dir` the directory its file is written to.
-	const body = (page, dir) => {
-		const repoRoot = relative(dir, join(siteDir, '..'));
-		return page.lines
-			.map(({ line, fenced }) => {
-				if (fenced) return line;
-				return (
-					line
-						// The page title is the h1, so `###` becomes `##`.
-						.replace(/^#(#{2,}) /, '$1 ')
-						.replace(/\]\(#([^)]+)\)/g, (match, anchor) => {
-							const target = anchors.get(anchor);
-							if (!target) return match;
-							if (target.page === page.slug && target.hash) return `](#${target.hash})`;
-							return `](/vidicon/docs/${target.page}/${target.hash ? `#${target.hash}` : ''})`;
-						})
-						.replace(/\]\((docs\/screenshots\/[^)]+)\)/g, (_, path) => `](${repoRoot}/${path})`)
-						// Any other repo file has no page on the site: link to it on GitHub.
-						.replace(/\]\((?![a-z][a-z+.-]*:|[#/]|\.\.\/)([^)]+)\)/g, (_, path) => `](https://github.com/emzbtw/vidicon/blob/main/${path})`)
-				);
-			})
-			.join('\n')
-			.trim();
-	};
+	// A section's Markdown for a file written to `dir`, with its links
+	// rewritten for the site.
+	const body = (page, dir) => sectionMarkdown(page, anchors, relative(dir, join(siteDir, '..')));
 
 	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
