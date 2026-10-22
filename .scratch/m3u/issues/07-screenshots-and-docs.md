@@ -16,7 +16,8 @@ it.
 
 - README and site: M3U out of "What it does not do", a short M3U
   section with the `credentials.toml` example; the install guide's setup
-  part covers both types.
+  part covers both types. The README's "source: Xtream Codes" badge
+  names M3U too.
 - `CONTEXT.md`: "Provider" and "Xtream Codes API" no longer say Xtream
   is the only source ("M3U provider" is already there).
 - SPEC 2: the milestone marked done. AGENTS.md Settled: the ADR 0001
