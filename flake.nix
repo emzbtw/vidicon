@@ -32,7 +32,7 @@
     # installed (with their config and scripts) are used, these otherwise.
     packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
       pname = "vidicon";
-      version = "0.1.0";
+      version = "0.1.1";
       src = pkgs.lib.fileset.toSource {
         root = ./.;
         fileset = pkgs.lib.fileset.unions [
