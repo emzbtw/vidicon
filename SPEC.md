@@ -69,7 +69,7 @@ look poor and slow down with large provider lists.
   (`docs/milestones/onboarding.md`); external EPG sources
   (`docs/milestones/epg-sources.md`).
 - M3U playlists as a second source type, by URL or path, live channels
-  only: `docs/milestones/m3u.md` (planned 2026-10-22).
+  only: `docs/milestones/m3u.md` (done 2026-10-22).
 
 ## 3. Architecture
 

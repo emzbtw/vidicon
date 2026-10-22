@@ -10,7 +10,7 @@
   <a href="https://github.com/emzbtw/vidicon/releases/latest"><img src="https://img.shields.io/github/v/release/emzbtw/vidicon" alt="Latest release"></a>
   <a href="#nixos"><img src="https://img.shields.io/badge/Nix-flake-5277C3?logo=nixos&logoColor=white" alt="Nix flake"></a>
   <img src="https://img.shields.io/badge/Linux-Wayland%20%7C%20X11-informational?logo=linux&logoColor=white" alt="Linux: Wayland or X11">
-  <img src="https://img.shields.io/badge/source-Xtream%20Codes-555" alt="Source: Xtream Codes">
+  <img src="https://img.shields.io/badge/source-Xtream%20Codes%20%7C%20M3U-555" alt="Source: Xtream Codes or M3U">
   <img src="https://img.shields.io/badge/Rust-1.92%2B-orange?logo=rust" alt="Rust 1.92+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-GPL--3.0--or--later-blue" alt="Licence: GPL-3.0-or-later"></a>
 </p>
@@ -25,7 +25,7 @@
 </p>
 
 Vidicon browses an Xtream Codes provider's live channels, guide, movies and
-series, and plays them in mpv.
+series, or the channels of an M3U playlist, and plays them in mpv.
 
 ![Vidicon: browsing channels, searching, the guide grid and movies](docs/screenshots/demo.gif)
 
@@ -64,8 +64,10 @@ filters in under 8 ms a keystroke.
 
 ## What it does not do
 
-- **M3U playlists or Stalker portals.** Xtream Codes is the only source
+- **Stalker portals.** Xtream Codes and M3U playlists are the only sources
   ([`docs/adr/0001-xtream-only-source.md`](docs/adr/0001-xtream-only-source.md)).
+- **Catch-up, movies or series from an M3U playlist.** Its entries are all
+  live channels.
 - **Play video itself.** mpv opens in its own window, driven over its IPC
   socket ([`docs/adr/0002-external-mpv-over-ipc.md`](docs/adr/0002-external-mpv-over-ipc.md)).
 - Windows, macOS, mobile or TV.
@@ -178,9 +180,11 @@ and a `SHA256SUMS` file.
 
 ## First run
 
-With no credentials file, Vidicon opens a form for the provider's server
-URL, username and password, checks the account, and saves it. Settings
-(`,`) adds more providers, edits them, and adds guide sources.
+With no credentials file, Vidicon opens a form for a provider. Pick its
+type: Xtream takes the server URL, username and password, and saves them
+once the account checks out; M3U takes a playlist URL or path, and saves
+it once the playlist reads. Settings (`,`) adds more providers, edits
+them, and adds guide sources.
 
 | What | Path |
 |---|---|
@@ -190,6 +194,32 @@ URL, username and password, checks the account, and saves it. Settings
 
 `--credentials <path>` or `VIDICON_CREDENTIALS` reads the credentials from
 another file. Vidicon refuses a credentials file that other users can read.
+
+### M3U providers
+
+An M3U provider in `credentials.toml`, as the form writes it:
+
+```toml
+[[provider]]
+id = "lists"
+name = "My lists"
+type = "m3u"
+url = "https://lists.example.net/tv.m3u"  # or an absolute path
+user_agent = "Example/1.0"                # optional
+```
+
+Every entry is a live channel, in its `group-title` category. The guide
+comes from the feeds the playlist names in its `#EXTM3U` line
+(`url-tvg` or `x-tvg-url`), and from any guide sources you add. A URL is fetched again
+on the refresh schedule; a file is read again when it changes. An M3U
+provider has no account, catch-up, movies or series, and the app hides
+them.
+
+![An M3U provider: no movies or series, a backup stream under its channel](docs/screenshots/main-m3u.png)
+
+A playlist URL from an Xtream panel (`get.php?username=...&password=...`)
+is better added as Xtream: the form offers to, and that also gives the
+guide, catch-up, movies and series.
 
 ## Keys
 

@@ -32,10 +32,24 @@ it.
 
 ## Acceptance
 
-- [ ] Site builds with link checking; no real provider data in any
-  screenshot.
-- [ ] SPEC 10 budgets met with an M3U provider active.
-- [ ] Milestone review's findings fixed.
+- [x] Site builds with link checking; no real provider data in any
+  screenshot. Retaken against the demo provider: `settings-add-provider`,
+  `settings-providers` (now with an M3U provider), `setup-add-provider`;
+  new: `settings-add-m3u`, `provider-picker`, `main-m3u`. The edit and
+  remove views did not change for an Xtream provider and stay.
+- [x] SPEC 10 budgets met with an M3U provider active
+  (`docs/perf/v1.md`, With an M3U provider active).
+- [x] Milestone review's findings fixed: an M3U stream's token in a
+  failed recording's note and log (ffmpeg's last line, now naming the
+  host only, and the log line redacted for Xtream too); `--probe-epg`
+  reading xz feeds; the README's first-run wording, `x-tvg-url`, the
+  section named "M3U providers"; AGENTS.md's Settled heading. Kept:
+  config's absolute-path-only playlists (SPEC 4.1); the picker's type
+  and the playlist URL's hidden query (ticket 06, checked by the user);
+  the recorder's no-limit for M3U (SPEC 9); the duplicated playlist
+  open-and-read shape in `import::playlist` and `check_playlist`, the
+  probe's own M3U scan, and the type labels in three places in
+  `ui.rs`, left as they are this close to the release.
 - [ ] v0.2.0 released with notes.
 
 ## Out of scope

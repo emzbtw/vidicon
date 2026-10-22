@@ -37,9 +37,10 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
 ## Settled
 
 - **Rust.**
-- **Xtream Codes API is the only source in v1.** Data model is multi-provider;
+- **Xtream Codes API was the only source in v1.** Data model is multi-provider;
   v1 UI has one active provider plus a switcher. ADR 0001, amended for external
-  XMLTV guide sources (EPG sources milestone).
+  XMLTV guide sources (EPG sources milestone) and for M3U playlists as a
+  second source type, live channels only (M3U milestone).
 - **v1 scope: live channels, EPG (now/next), favourites.** No VOD, series or
   catch-up yet. EPG timeline grid is a later milestone:
   `docs/milestones/guide-grid.md`.
@@ -108,7 +109,7 @@ on the account's one connection (stream recovery ticket 01).
 `--probe-blackout <stream_id>` plays a channel in an mpv window until
 it is closed and prints the black, frozen and silent spans ffmpeg's
 detect filters find, with bitrate and mpv's CPU (ticket 05).
-`--probe-epg <url-or-path>` streams an external XMLTV feed (gzip or
+`--probe-epg <url-or-path>` streams an external XMLTV feed (gzip, xz or
 plain) and prints counts only: size, channels, programmes, reach,
 time offsets, matches against the first provider's stored channels by
 id and by normalised name, and how its times compare with the

@@ -215,12 +215,20 @@ vidicon --play --screenshot docs/screenshots/main-guide.png \
   `,jjj<Tab>jjllkk<Enter><C-u>/srv/tv<Enter>` (4 min saved, the folder
   refused);
   `settings-add-provider`: a few `jk` pairs, then `p j<Enter>`,
-  `<Enter>Spare<Space>TV<Enter>`,
+  `j<Enter>Spare<Space>TV<Enter>`,
   `j<Enter>127.0.0.1:47811/get.php?username=x<Enter>`,
   `j<Enter>demo<Enter> j<Enter>nope<Enter> j<Enter>` and 80 `h`
-  (which move nothing, so the refusal stays);
-  `settings-providers`: the same with the password `demo`, the URL
-  without its path (onboarding ticket 01);
+  (which move nothing, so the refusal stays; the form opens on its
+  type, M3U ticket 07);
+  `settings-add-m3u`: a few `jk` pairs, then `p j<Enter> <Enter>`
+  (M3U), `j<Enter>Demo<Space>Lists<Enter>`, `j<Enter>` and the
+  playlist URL below, `<Enter> j` and 80 `h`;
+  `settings-providers`: the same, then `j<Enter>` (saved) and 120 `h`
+  (M3U ticket 07);
+  `provider-picker`: with Demo Lists saved as above and imported, a
+  few `jk` pairs, then `p`;
+  `main-m3u`: Demo Lists switched to and imported, then
+  `jjjjjj<Enter>` and 9 `jk` pairs;
   `settings-edit-provider`: with the second `[[provider]]` as for
   `settings`, imported, a few `jk` pairs, then `,<Tab>j<Enter>`;
   `settings-remove-provider`: the same, then `jjjjj<Enter>`

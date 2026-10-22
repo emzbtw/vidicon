@@ -4,8 +4,8 @@ Glossary for Vidicon, an IPTV player. Terms only; decisions go in `docs/adr/`.
 
 ## Terms
 
-- **Provider**: an IPTV service the user has an account with. v1 supports providers that speak the Xtream Codes API.
-- **Xtream Codes API**: the HTTP API (`player_api.php`, credentials as query params) a provider exposes for listing and streaming content. The only source type in v1.
+- **Provider**: an IPTV service the user has an account with, or a playlist they read channels from. A provider speaks the Xtream Codes API or is an M3U provider.
+- **Xtream Codes API**: the HTTP API (`player_api.php`, credentials as query params) a provider exposes for listing and streaming content. One of two source types, and the only one with an account, catch-up and VOD.
 - **M3U provider**: a provider read from an M3U playlist, by URL or local path, instead of the Xtream Codes API. Its entries are all live channels; it has no account, catch-up or VOD.
 - **Channel**: a live stream offered by a provider. v1 content is live channels only (no VOD, series or catch-up).
 - **EPG**: the electronic programme guide: what is airing on each channel and when.
