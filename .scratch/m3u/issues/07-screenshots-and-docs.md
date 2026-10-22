@@ -1,6 +1,6 @@
 # 07: Screenshots and docs
 
-Status: open. Blocked by: 03, 04, 05, 06.
+Status: done. Blocked by: 03, 04, 05, 06.
 
 ## Goal
 
@@ -50,7 +50,7 @@ it.
   open-and-read shape in `import::playlist` and `check_playlist`, the
   probe's own M3U scan, and the type labels in three places in
   `ui.rs`, left as they are this close to the release.
-- [ ] v0.2.0 released with notes.
+- [x] v0.2.0 released with notes; the release run's install tests passed.
 
 ## Out of scope
 
