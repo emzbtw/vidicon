@@ -97,33 +97,18 @@ pub async fn playlist(
     } else {
         None
     };
-    let (tx, rx) = mpsc::channel(CHUNKS_IN_FLIGHT);
-    let job = {
-        let (writer, id, name) = (writer.clone(), provider.id.clone(), provider.name.clone());
-        let (path, label) = (path.map(Path::to_owned), label.clone());
-        tokio::task::spawn_blocking(move || {
+    let (writer, id, name) = (writer.clone(), provider.id.clone(), provider.name.clone());
+    let (fetched, stored) = read_playlist(client, {
+        let label = label.clone();
+        move |body| {
+            let body = body.map_err(|e| format!("{name}: {label}: {e}"))?;
             let mut conn = writer.lock().unwrap_or_else(|e| e.into_inner());
-            match path {
-                Some(path) => {
-                    let file =
-                        std::fs::File::open(&path).map_err(|e| format!("{name}: {label}: {e}"))?;
-                    write_playlist(&mut conn, (&id, &name), file, mtime, unix_now())
-                }
-                None => write_playlist(
-                    &mut conn,
-                    (&id, &name),
-                    ChunkReader::new(rx),
-                    None,
-                    unix_now(),
-                ),
-            }
-        })
-    };
-    let fetched = match mtime {
-        Some(_) => Ok(0),
-        None => client.playlist(tx).await,
-    };
-    let stored = job.await.map_err(|e| format!("import task failed: {e}"))?;
+            write_playlist(&mut conn, (&id, &name), body, mtime, unix_now())
+        }
+    })
+    .await;
+    let stored = stored.map_err(|e| format!("import task failed: {e}"))?;
+    // A network error explains a parse error, so it wins.
     fetched?;
     let (n, skipped) = stored?;
     log::info!(
@@ -150,39 +135,21 @@ pub enum PlaylistCheck {
 /// anything, so a refused one saves nothing.
 pub async fn check_playlist(client: &Client) -> PlaylistCheck {
     let provider = client.provider();
-    let path = provider.playlist_path().map(Path::to_owned);
-    let (tx, rx) = mpsc::channel(CHUNKS_IN_FLIGHT);
-    let job = {
-        let (path, name, label) = (
-            path.clone(),
-            provider.name.clone(),
-            provider.playlist_label(),
-        );
-        tokio::task::spawn_blocking(move || {
-            let body: Box<dyn Read> = match path {
-                Some(path) => Box::new(
-                    std::fs::File::open(path)
-                        .map_err(|e| PlaylistCheck::Unreachable(format!("{name}: {label}: {e}")))?,
-                ),
-                None => Box::new(ChunkReader::new(rx)),
-            };
-            let mut n = 0;
-            m3u::read(body, |_| {
-                n += 1;
-                Ok::<_, std::convert::Infallible>(())
-            })
-            .map_err(|e| match e {
-                m3u::ReadError::Body(e) => PlaylistCheck::Rejected(e),
-                m3u::ReadError::Each(never) => match never {},
-            })?;
-            Ok(n)
+    let (name, label) = (provider.name.clone(), provider.playlist_label());
+    let (fetched, read) = read_playlist(client, move |body| {
+        let body = body.map_err(|e| PlaylistCheck::Unreachable(format!("{name}: {label}: {e}")))?;
+        let mut n = 0;
+        m3u::read(body, |_| {
+            n += 1;
+            Ok::<_, std::convert::Infallible>(())
         })
-    };
-    let fetched = match path {
-        Some(_) => Ok(0),
-        None => client.playlist(tx).await,
-    };
-    let read = job.await;
+        .map_err(|e| match e {
+            m3u::ReadError::Body(e) => PlaylistCheck::Rejected(e),
+            m3u::ReadError::Each(never) => match never {},
+        })?;
+        Ok(n)
+    })
+    .await;
     // A network error explains a parse error, so it wins.
     if let Err(e) = fetched {
         return PlaylistCheck::Unreachable(e);
@@ -193,6 +160,30 @@ pub async fn check_playlist(client: &Client) -> PlaylistCheck {
         Ok(Err(check)) => check,
         Err(e) => PlaylistCheck::Unreachable(format!("check task failed: {e}")),
     }
+}
+
+/// Runs `read` on a blocking thread over an M3U provider's playlist: its
+/// file opened, or its body as `client` fetches it. Returns the fetch's
+/// result, `Ok` for a file, and what `read` returned.
+async fn read_playlist<T: Send + 'static>(
+    client: &Client,
+    read: impl FnOnce(io::Result<Box<dyn Read>>) -> T + Send + 'static,
+) -> (Result<(), String>, Result<T, tokio::task::JoinError>) {
+    let path = client.provider().playlist_path().map(Path::to_owned);
+    let fetch = path.is_none();
+    let (tx, rx) = mpsc::channel(CHUNKS_IN_FLIGHT);
+    let job = tokio::task::spawn_blocking(move || {
+        read(match path {
+            Some(path) => std::fs::File::open(path).map(|f| Box::new(f) as Box<dyn Read>),
+            None => Ok(Box::new(ChunkReader::new(rx))),
+        })
+    });
+    let fetched = if fetch {
+        client.playlist(tx).await.map(drop)
+    } else {
+        Ok(())
+    };
+    (fetched, job.await)
 }
 
 /// Whether an M3U provider's playlist path changed since it was last
