@@ -35,7 +35,8 @@ SPEC 6.1, 7.1, 7.2. `src/epg_sources.rs`, `src/config.rs`
 - [x] Tests: header forms; feed order and fallback; `tvg-name` match;
   an xz feed imports; a cut-off xz feed is rejected.
 - [ ] Checked against the demo playlist, then by the user with a real
-  one. Packages' install tests pass unchanged.
+  one. Packages' install tests pass unchanged. Demo and real playlist
+  checked 2026-10-22; the install tests wait on the release CI.
 - [x] `code-review` of the ticket's diff; findings fixed: a feed took
   the guide entry's `name`; xz's 6-byte magic read from one chunk; the
   guide's slot computed twice; an unrelated rustfmt hunk. A test of xz
