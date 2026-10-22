@@ -1,9 +1,10 @@
 # Releasing
 
-A pushed `vX.Y.Z` tag runs `.github/workflows/release.yml`: build, unit
-tests, the .deb, .rpm and tarball, install tests, then the GitHub Release
-(created if the tag has none) with the files attached. Everything before
-the tag and the AUR files after it is by hand.
+A pushed `vX.Y.Z` tag runs `.github/workflows/release.yml`: a format
+check, build, unit tests, the .deb, .rpm and tarball, install tests, then
+the GitHub Release (created if the tag has none) with the files
+attached. Everything before the tag and the AUR files after it is by
+hand.
 
 The website (`site/`) redeploys on its own when `README.md`,
 `docs/screenshots/`, `assets/`, `Cargo.toml` or `site/` change on
@@ -14,8 +15,8 @@ needs nothing else for it.
 
 1. **Bump the version** in `Cargo.toml` and `flake.nix` (both `version =
    "X.Y.Z"`), then run `cargo build` to update `Cargo.lock`. Done when
-   `cargo build --locked` passes. The workflow stops if either file
-   disagrees with the tag.
+   `cargo build --locked` and `cargo fmt --check` pass. The workflow
+   stops if either file disagrees with the tag, or on unformatted code.
 2. **Commit, tag and push**: `git tag vX.Y.Z`, then
    `git push origin main vX.Y.Z`.
 3. **Watch the run** (`gh run watch`). Done when the release lists
