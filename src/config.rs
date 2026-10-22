@@ -209,14 +209,88 @@ pub fn epg_labels(provider: &Provider) -> Vec<String> {
             } else {
                 s.label()
             };
-            let label = std::iter::once(base.clone())
-                .chain((2..).map(|n| format!("{base} {n}")))
-                .find(|l| !taken.contains(l))
-                .unwrap_or_default();
-            taken.push(label.clone());
-            label
+            unique(&base, &mut taken)
         })
         .collect()
+}
+
+/// `base`, or `base 2`, `base 3` and on, whichever is not in `taken`,
+/// added to it.
+fn unique(base: &str, taken: &mut Vec<String>) -> String {
+    let label = std::iter::once(base.to_owned())
+        .chain((2..).map(|n| format!("{base} {n}")))
+        .find(|l| !taken.contains(l))
+        .unwrap_or_default();
+    taken.push(label.clone());
+    label
+}
+
+/// An M3U provider's playlist feeds `urls` (M3U ticket 05) as sources
+/// for its guide's slot: on, off and shifted with that entry, fetched as
+/// any URL with the default limits. A feed an entry names already is left
+/// to that entry. None for an Xtream provider.
+pub fn playlist_feeds(provider: &Provider, urls: &[String]) -> Vec<EpgSource> {
+    if provider.source != Source::M3u {
+        return Vec::new();
+    }
+    let order = epg_order(provider);
+    let guide = order.iter().find(|s| s.provider_guide);
+    let mut feeds: Vec<EpgSource> = Vec::new();
+    for url in urls {
+        let feed = EpgSource {
+            url: Some(url.clone()),
+            provider_guide: false,
+            name: None,
+            ..guide.cloned().unwrap_or_else(EpgSource::provider_guide)
+        };
+        let ident = feed.ident();
+        if !order
+            .iter()
+            .chain(&feeds)
+            .any(|s| !s.provider_guide && s.ident() == ident)
+        {
+            feeds.push(feed);
+        }
+    }
+    feeds
+}
+
+/// Where the provider's guide sits in [`epg_order`], and so its playlist's
+/// feeds.
+pub fn guide_slot(order: &[EpgSource]) -> usize {
+    order
+        .iter()
+        .position(|s| s.provider_guide)
+        .map_or(0, |i| i + 1)
+}
+
+/// [`epg_order`] with `feeds` ([`playlist_feeds`]) after the provider's
+/// guide: the order a refresh fetches in.
+pub fn feed_order(provider: &Provider, feeds: &[EpgSource]) -> Vec<EpgSource> {
+    let mut order = epg_order(provider);
+    let at = guide_slot(&order);
+    order.splice(at..at, feeds.iter().cloned());
+    order
+}
+
+/// [`epg_labels`] for [`feed_order`]: each feed by its file name, as a
+/// playlist's feeds often share a host, else by its
+/// [`EpgSource::label`]; made unique after the others.
+pub fn feed_labels(provider: &Provider, feeds: &[EpgSource]) -> Vec<String> {
+    let mut labels = epg_labels(provider);
+    let mut taken = labels.clone();
+    let file = |f: &EpgSource| {
+        let url = reqwest::Url::parse(f.url.as_deref()?).ok()?;
+        let name = url.path_segments()?.next_back()?;
+        (!name.is_empty()).then(|| name.to_owned())
+    };
+    let named: Vec<String> = feeds
+        .iter()
+        .map(|f| unique(&file(f).unwrap_or_else(|| f.label()), &mut taken))
+        .collect();
+    let at = guide_slot(&epg_order(provider));
+    labels.splice(at..at, named);
+    labels
 }
 
 // The URL can hold a token.

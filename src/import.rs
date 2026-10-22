@@ -13,6 +13,7 @@ use crate::store::{self, Kind, NewChannel, NewMovie, NewProgramme, NewSeries};
 use crate::xtream::{Chunk, Client, Movie, Series, Stream};
 use bytes::{Buf, Bytes};
 use flate2::bufread::MultiGzDecoder;
+use lzma_rust2::XzReader;
 use quick_xml::events::Event;
 use rusqlite::Connection;
 use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, SeqAccess, Visitor};
@@ -239,7 +240,7 @@ pub(crate) const EPG_KEEP_PAST: i64 = 3600;
 pub(crate) const EPG_KEEP_AHEAD: i64 = 3 * 86_400;
 
 /// Replaces a provider's programmes with those in `body`, an XMLTV document,
-/// gzipped or not, in one transaction, their times moved by `shift`
+/// gzipped, xz or plain, in one transaction, their times moved by `shift`
 /// seconds. Only programmes overlapping `now - 1 h .. now + 3 days` are
 /// kept, or from further back on a guide id with an archive: as many days
 /// back as its longest archive. Returns how many were.
@@ -256,7 +257,7 @@ pub fn write_epg(
     // Channels refresh first (SPEC 7.2), so their archives are current.
     let archives = store::archive_days_by_guide(&tx, provider_id).map_err(db)?;
 
-    let xml = gunzipped(body).map_err(|e| format!("EPG download interrupted: {e}"))?;
+    let xml = unpacked(body).map_err(|e| format!("EPG download interrupted: {e}"))?;
     let until = now + EPG_KEEP_AHEAD;
     let (mut kept, mut outside) = (0, 0);
     let skipped = parse_xmltv(xml, |p| {
@@ -277,18 +278,60 @@ pub fn write_epg(
     Ok(kept)
 }
 
-/// `body`, gunzipped if it starts as gzip does.
-pub(crate) fn gunzipped<'a>(body: impl Read + 'a) -> io::Result<Box<dyn BufRead + 'a>> {
-    let mut body = BufReader::with_capacity(64 * 1024, body);
-    let gzipped = body.fill_buf()?.starts_with(&[0x1f, 0x8b]);
-    Ok(if gzipped {
+/// `body`, gunzipped or unxzed if it starts as gzip or xz does (M3U
+/// ticket 05). xz's checks fail a cut-off body; `</tv>` is still what
+/// says a feed is whole.
+pub(crate) fn unpacked<'a>(mut body: impl Read + 'a) -> io::Result<Box<dyn BufRead + 'a>> {
+    // xz's magic is 6 bytes, which a first chunk may not hold.
+    let mut head = [0; 6];
+    let n = Filled(&mut body).read(&mut head)?;
+    let head = head[..n].to_vec();
+    let gzip = head.starts_with(&[0x1f, 0x8b]);
+    let xz = head.starts_with(b"\xfd7zXZ\0");
+    let body = BufReader::with_capacity(64 * 1024, Read::chain(io::Cursor::new(head), body));
+    Ok(if gzip {
         Box::new(BufReader::with_capacity(
             64 * 1024,
             MultiGzDecoder::new(body),
         ))
+    } else if xz {
+        Box::new(BufReader::with_capacity(
+            64 * 1024,
+            XzReader::new(Filled(body), true),
+        ))
     } else {
         Box::new(body)
     })
+}
+
+/// A reader whose reads fill the buffer unless the body ends. lzma-rust2
+/// 0.23's `XzReader` reads a block's padding with one `read`, so a chunk
+/// ending inside the padding failed a whole feed.
+struct Filled<R>(R);
+
+impl<R: Read> Read for Filled<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let mut n = 0;
+        while n < buf.len() {
+            match self.0.read(&mut buf[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(n)
+    }
+}
+
+/// `data` xz-compressed, as a guide feed may be.
+#[cfg(test)]
+pub(crate) fn xz(data: &[u8]) -> Vec<u8> {
+    use lzma_rust2::{XzOptions, XzWriter};
+    use std::io::Write;
+    let mut w = XzWriter::new(Vec::new(), XzOptions::with_preset(1)).unwrap();
+    w.write_all(data).unwrap();
+    w.finish().unwrap()
 }
 
 impl NewProgramme<'_> {
@@ -605,7 +648,8 @@ pub fn write_channels(
 /// Replaces a provider's categories and channels with `body`, an M3U
 /// playlist (M3U ticket 02), in one transaction: each entry a live
 /// channel, its group its category ("Uncategorised" for none), its number
-/// `tvg-chno` else its place in the file. `mtime` is stored for a path.
+/// `tvg-chno` else its place in the file. `mtime` is stored for a path,
+/// and the header's guide feeds (M3U ticket 05).
 /// A body that is not a channel list, or has no entries, keeps the old
 /// channels. Returns the channels imported and the entries skipped.
 pub fn write_playlist(
@@ -619,7 +663,7 @@ pub fn write_playlist(
     let tx = conn.transaction().map_err(db)?;
     store::begin_playlist_import(&tx, provider_id, provider_name).map_err(db)?;
     let mut ord = 0;
-    let skipped = m3u::read(body, |e: m3u::Entry| {
+    let summary = m3u::read(body, |e: m3u::Entry| {
         let url = e.url.as_str();
         let key = e
             .tvg_id
@@ -662,8 +706,9 @@ pub fn write_playlist(
     let lost = store::finish_playlist_ids(&tx, provider_id, playlist_id).map_err(db)?;
     store::finish_channel_import(&tx, provider_id, now).map_err(db)?;
     store::set_playlist_mtime(&tx, provider_id, mtime).map_err(db)?;
+    store::set_playlist_guides(&tx, provider_id, &summary.guides).map_err(db)?;
     tx.commit().map_err(db)?;
-    Ok((ord as usize - lost, skipped))
+    Ok((ord as usize - lost, summary.skipped))
 }
 
 /// The category of a playlist entry with no group.
@@ -2048,6 +2093,23 @@ mod tests {
     }
 
     #[test]
+    fn xz_epg_is_detected() {
+        let (_dir, mut conn) = db();
+        let mut fixture = Xmltv::new(3);
+        let expected = fixture.expected();
+        let mut full = Vec::new();
+        fixture.read_to_end(&mut full).unwrap();
+        assert_eq!(epg_import(&mut conn, &xz(&full)[..]), Ok(expected));
+        // Its magic split over the first chunks, as a download may be.
+        let (tx, rx) = mpsc::channel(1024);
+        for chunk in xz(&full).chunks(3) {
+            tx.blocking_send(Ok(Bytes::copy_from_slice(chunk))).unwrap();
+        }
+        drop(tx);
+        assert_eq!(epg_import(&mut conn, ChunkReader::new(rx)), Ok(expected));
+    }
+
+    #[test]
     fn epg_reimport_replaces_previous_programmes() {
         let (_dir, mut conn) = db();
         epg_import(&mut conn, Xmltv::new(10)).unwrap();
@@ -2070,12 +2132,17 @@ mod tests {
         flate2::read::GzEncoder::new(&full[..], flate2::Compression::fast())
             .read_to_end(&mut gz)
             .unwrap();
-        let cases: [(&[u8], &str); 5] = [
+        let xz = xz(&full);
+        let cases: [(&[u8], &str); 7] = [
             // Cut mid-tag or mid-text, depending on where half falls.
             (&full[..full.len() / 2], "invalid XMLTV|incomplete"),
             // Cut exactly after a programme: well-formed so far, but no `</tv>`.
             (&full[..full.len() - "</tv>\n".len()], "incomplete"),
             (&gz[..gz.len() / 2], "interrupted"),
+            // xz cut short, or cut just before its last bytes, the index
+            // and footer, where the XML may be whole.
+            (&xz[..xz.len() / 2], "interrupted"),
+            (&xz[..xz.len() - 12], "interrupted|incomplete"),
             (b"<tv><programme></title></tv>", "invalid XMLTV"),
             (b"", "incomplete"),
         ];
@@ -2303,7 +2370,12 @@ mod tests {
             ]
         );
         assert_eq!(last_refresh(&conn), Some(NOW));
-        // No playlist URL, header feed or token outside the stream URLs.
+        // The header's feed is kept for the guide (M3U ticket 05), apart.
+        assert_eq!(
+            store::playlist_guides(&conn, "p").unwrap(),
+            ["http://g.example/guide.xml"]
+        );
+        // No playlist URL, guide feed or token in the name or stamps.
         let dump: String = conn
             .query_row(
                 "SELECT group_concat(coalesce(name, '') || coalesce(last_channels_refresh, '')) FROM provider",
@@ -2337,6 +2409,7 @@ mod tests {
             assert!(err.contains(why), "{body:?}: {err}");
             assert_eq!(playlist_rows(&conn), before);
             assert_eq!(last_refresh(&conn), Some(NOW));
+            assert_eq!(store::playlist_guides(&conn, "p").unwrap().len(), 1);
         }
         // A download cut short.
         let (tx, rx) = mpsc::channel(4);

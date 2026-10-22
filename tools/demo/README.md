@@ -87,6 +87,8 @@ by the looser name form, with times an hour late, put right by
 40 channels are ambiguous. Both send an `ETag` and answer a request
 that sends it back with a 304 (EPG sources ticket 03);
 `DEMO_FAIL=epg:429` answers them with a 429 and `Retry-After: 60`.
+`/epg/other.xml.xz` is the second feed again, xz-compressed and on time,
+for the playlist below (M3U ticket 05).
 
 ```toml
 [[provider.epg]]
@@ -111,7 +113,9 @@ title with a comma, a URL with a 1.5k-character token, a URL with no
 03): 7 sets a user agent with a comma and a referrer by `#EXTVLCOPT`
 lines, 8 a user agent and an origin by a `|` suffix. `/live/` refuses
 them (403) without that user agent. `DEMO_SLOW=playlist:20` and
-`DEMO_FAIL=playlist:503` work on it.
+`DEMO_FAIL=playlist:503` work on it. Its `#EXTM3U` line names two guide
+feeds (M3U ticket 05): `match.xml` by `url-tvg` and `other.xml.xz` by
+`x-tvg-url`, so its channels get a guide with no `[[provider.epg]]`.
 
 ```toml
 [[provider]]

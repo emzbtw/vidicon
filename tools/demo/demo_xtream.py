@@ -3,7 +3,7 @@
 
 `demo_xtream.py <port> [channels]`: with a channel count, generated categories
 are added after the screenshot set, for the performance pass (docs/perf/)."""
-import base64, gzip, json, os, random, struct, subprocess, sys, tempfile, threading, time, zlib
+import base64, gzip, json, lzma, os, random, struct, subprocess, sys, tempfile, threading, time, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
 from xml.sax.saxutils import escape
@@ -238,6 +238,8 @@ def xmltv():
 # match by the looser name form, and gives times an hour late, as a feed
 # set in another zone would: `shift_minutes = -60` puts them right. Two of
 # its channels share a name, so the channels with it are ambiguous.
+# `/epg/other.xml.xz` is the same feed xz-compressed and on time, for the
+# playlist's header (M3U ticket 05).
 def external(chans, late):
     fmt = lambda t: time.strftime("%Y%m%d%H%M%S +0000", time.gmtime(t + late))
     out = ['<?xml version="1.0" encoding="UTF-8"?><tv>']
@@ -269,7 +271,9 @@ def external_feeds():
         other.setdefault(cid, (cid, f"{brand} ({region})", titles_by[s["stream_id"]]))
     first = next(iter(other.values()))
     other[first[0] + ".alt"] = (first[0] + ".alt", first[1], None)
-    return external(list(match.values()), 0).encode(), gzip.compress(external(list(other.values()), 3600).encode())
+    return (external(list(match.values()), 0).encode(),
+            gzip.compress(external(list(other.values()), 3600).encode()),
+            lzma.compress(external(list(other.values()), 0).encode(), format=lzma.FORMAT_XZ))
 
 # An invented M3U playlist of the same channels (M3U ticket 02), each
 # streaming from `/live/` as the Xtream ones do, with the forms real lists
@@ -277,11 +281,14 @@ def external_feeds():
 # groups, a blank line and a comment inside an entry, unquoted attributes,
 # a title with a comma, a long URL with a token, a URL with no `#EXTINF`,
 # an `#EXTINF` with no URL (skipped and counted) and an
-# `#EXT-X-CREDENTIALS` line, which is skipped.
+# `#EXT-X-CREDENTIALS` line, which is skipped. Its header names two of the
+# external guides, one in each attribute, the second xz (M3U ticket 05).
 def playlist():
     names = {c["category_id"]: c["category_name"] for c in categories}
     live = lambda sid: f"http://127.0.0.1:{PORT}/live/demo/demo/{sid}.ts"
-    out = ["#EXTM3U", "#EXT-X-CREDENTIALS:none"]
+    guides = (f'url-tvg="http://127.0.0.1:{PORT}/epg/match.xml" '
+              f'x-tvg-url="http://127.0.0.1:{PORT}/epg/other.xml.xz?token=demo"')
+    out = ["#EXTM3U " + guides, "#EXT-X-CREDENTIALS:none"]
     for i, s in enumerate(streams):
         group, title, url = names[s["category_id"]], s["name"], live(s["stream_id"])
         if i == 2:
@@ -541,14 +548,15 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if u.path in ("/epg/match.xml", "/epg/other.xml.gz"):
+        feeds = ("/epg/match.xml", "/epg/other.xml.gz", "/epg/other.xml.xz")
+        if u.path in feeds:
             if FAIL[0] == "epg":
                 self.send_response(int(FAIL[2]))
                 self.send_header("Retry-After", "60")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            body = EXTERNAL[u.path == "/epg/other.xml.gz"]
+            body = EXTERNAL[feeds.index(u.path)]
             etag = f'"{zlib.crc32(body):08x}"'
             if self.headers.get("If-None-Match") == etag:
                 self.send_response(304)
@@ -556,7 +564,8 @@ class H(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             self.send_response(200)
-            self.send_header("Content-Type", "application/xml" if u.path.endswith(".xml") else "application/gzip")
+            ctype = {"xml": "application/xml", "gz": "application/gzip", "xz": "application/x-xz"}
+            self.send_header("Content-Type", ctype[u.path.rsplit(".", 1)[1]])
             self.send_header("Content-Length", str(len(body)))
             self.send_header("ETag", etag)
             self.end_headers()

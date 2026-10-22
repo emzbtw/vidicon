@@ -32,11 +32,18 @@ SPEC 6.1, 7.1, 7.2. `src/epg_sources.rs`, `src/config.rs`
 
 ## Acceptance
 
-- [ ] Tests: header forms; feed order and fallback; `tvg-name` match;
+- [x] Tests: header forms; feed order and fallback; `tvg-name` match;
   an xz feed imports; a cut-off xz feed is rejected.
 - [ ] Checked against the demo playlist, then by the user with a real
   one. Packages' install tests pass unchanged.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+- [x] `code-review` of the ticket's diff; findings fixed: a feed took
+  the guide entry's `name`; xz's 6-byte magic read from one chunk; the
+  guide's slot computed twice; an unrelated rustfmt hunk. A test of xz
+  in 3-byte chunks found lzma-rust2 0.23 reading block padding with one
+  `read`, so reads into it are filled. Kept: `tvg-name` before the name
+  at each name step (its exact form, the name's, then the looser
+  forms), and an ambiguous `tvg-name` is no match; the `http(s)`-only
+  feeds; migration 31 reading M3U playlists again at once.
 
 ## Out of scope
 

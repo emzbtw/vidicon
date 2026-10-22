@@ -1,16 +1,17 @@
 //! External guide sources (EPG sources ticket 02): XMLTV feeds by URL or
 //! path, set per provider in `credentials.toml` and ordered with its own
-//! `xmltv.php`. Each is streamed, gzipped or plain, into one transaction:
+//! `xmltv.php`, or an M3U provider's playlist feeds in that place (M3U
+//! ticket 05). Each is streamed, gzipped, xz or plain, into one transaction:
 //! its whole channel list, which provider channels it matches, and the
 //! programmes of matched channels only, shifted and in the kept window
 //! (SPEC 7.1). A failure rolls back to its last good data and never fails
 //! the provider's refresh. URLs can hold a token, so logs and errors name a
 //! source by its label only.
 
-use crate::config::{EpgSource, Provider, epg_order};
+use crate::config::{EpgSource, Provider, feed_order, playlist_feeds};
 use crate::import::{
     ChunkReader, EPG_KEEP_AHEAD, EPG_KEEP_PAST, FeedChannel, Item, Writer, days_from_civil,
-    gunzipped, parse_xmltv_items, unix_now,
+    parse_xmltv_items, unix_now, unpacked,
 };
 use crate::store::{self, NewProgramme, SourceFetch, name_norm};
 use crate::xtream::{self, Chunk};
@@ -136,10 +137,21 @@ fn file_mtime(path: &Path) -> Option<i64> {
     i64::try_from(d.as_nanos()).ok()
 }
 
+/// The guide feeds of an M3U provider's playlist, as stored at its last
+/// import (M3U ticket 05); none for an Xtream provider.
+pub fn feeds(conn: &Connection, provider: &Provider) -> Vec<EpgSource> {
+    let urls = store::playlist_guides(conn, &provider.id).unwrap_or_else(|e| {
+        log::error!("reading playlist guides: {e}");
+        Vec::new()
+    });
+    playlist_feeds(provider, &urls)
+}
+
 /// Stores the provider's sources in their order, its own guide first unless
-/// an entry places it, and returns the enabled external ones in order.
+/// an entry places it, its playlist's feeds after it, and returns the
+/// enabled external ones in order.
 pub fn sync(conn: &mut Connection, provider: &Provider, now: i64) -> Result<Vec<Planned>, String> {
-    let sources = epg_order(provider);
+    let sources = feed_order(provider, &feeds(conn, provider));
     let idents: Vec<String> = sources.iter().map(EpgSource::ident).collect();
     let entries: Vec<store::SourceEntry> = sources
         .iter()
@@ -370,7 +382,7 @@ fn retry_after(value: &str, now: i64) -> Option<i64> {
 }
 
 /// Replaces source `source`'s channels, matches and programmes with those
-/// in `body`, an XMLTV document, gzipped or not, in one transaction. The
+/// in `body`, an XMLTV document, gzipped, xz or plain, in one transaction. The
 /// provider's channels are matched once the feed's channels are in, at its
 /// first programme (XMLTV lists channels first). Programmes of matched
 /// channels are kept, moved by `shift` seconds, from as far back as the
@@ -387,7 +399,7 @@ pub fn write_source(
     let db = |e: rusqlite::Error| format!("saving guide: {e}");
     let tx = conn.transaction().map_err(db)?;
     store::begin_source_import(&tx, provider_id, source, now).map_err(db)?;
-    let xml = gunzipped(body).map_err(|e| format!("download interrupted: {e}"))?;
+    let xml = unpacked(body).map_err(|e| format!("download interrupted: {e}"))?;
     let mut channels = Vec::new();
     // Feed channel id to how far back its programmes are kept.
     let mut keep: Option<HashMap<String, i64>> = None;
@@ -449,29 +461,27 @@ fn match_channels(
     let index = Index::new(channels, &[name_norm, epg_norm]);
     let mapped = store::source_mappings(tx, provider_id, source)?;
     let mut keep = HashMap::new();
-    store::each_channel(
-        tx,
-        provider_id,
-        |stream_id, guide_id, name, archive_days| {
-            let manual = mapped.get(&stream_id).and_then(|id| index.id(id));
-            match manual.map_or_else(|| index.find(guide_id, name), Match::Id) {
-                Match::Id(i) | Match::Name(i) => {
-                    let id = &channels[i].id;
-                    let guide_id = store::source_guide_id(source, id);
-                    store::insert_source_match(tx, source, stream_id, Some(&guide_id))?;
-                    let past = match archive_days {
-                        0 => EPG_KEEP_PAST,
-                        days => days * 86_400,
-                    };
-                    let e = keep.entry(id.clone()).or_insert(past);
-                    *e = (*e).max(past);
-                }
-                Match::Ambiguous => store::insert_source_match(tx, source, stream_id, None)?,
-                Match::None => {}
+    store::each_channel(tx, provider_id, |c| {
+        let (stream_id, archive_days) = (c.stream_id, c.archive_days);
+        let names: Vec<&str> = c.tvg_name.into_iter().chain([c.name]).collect();
+        let manual = mapped.get(&stream_id).and_then(|id| index.id(id));
+        match manual.map_or_else(|| index.find_names(c.epg_channel_id, &names), Match::Id) {
+            Match::Id(i) | Match::Name(i) => {
+                let id = &channels[i].id;
+                let guide_id = store::source_guide_id(source, id);
+                store::insert_source_match(tx, source, stream_id, Some(&guide_id))?;
+                let past = match archive_days {
+                    0 => EPG_KEEP_PAST,
+                    days => days * 86_400,
+                };
+                let e = keep.entry(id.clone()).or_insert(past);
+                *e = (*e).max(past);
             }
-            Ok(())
-        },
-    )?;
+            Match::Ambiguous => store::insert_source_match(tx, source, stream_id, None)?,
+            Match::None => {}
+        }
+        Ok(())
+    })?;
     Ok(keep)
 }
 
@@ -528,17 +538,25 @@ impl Index {
     /// Exact id first, then each normalised name. Two or more at a step is
     /// ambiguous, never a guess.
     pub fn find(&self, guide_id: Option<&str>, name: &str) -> Match {
+        self.find_names(guide_id, &[name])
+    }
+
+    /// As [`Index::find`], with `names` tried in order at each name step:
+    /// an M3U channel's `tvg-name`, then its name (M3U ticket 05).
+    pub fn find_names(&self, guide_id: Option<&str>, names: &[&str]) -> Match {
         if let Some(found) = guide_id.and_then(|g| self.ids.get(g)) {
             return match found[..] {
                 [i] => Match::Id(i),
                 _ => Match::Ambiguous,
             };
         }
-        for (norm, names) in &self.steps {
-            match names.get(&norm(name)).map(|v| &v[..]) {
-                Some(&[i]) => return Match::Name(i),
-                Some(_) => return Match::Ambiguous,
-                None => {}
+        for (norm, by_name) in &self.steps {
+            for name in names {
+                match by_name.get(&norm(name)).map(|v| &v[..]) {
+                    Some(&[i]) => return Match::Name(i),
+                    Some(_) => return Match::Ambiguous,
+                    None => {}
+                }
             }
         }
         Match::None
@@ -777,6 +795,224 @@ mod tests {
         // Search and the grid list the channels with a guide.
         let view = store::View::All(store::Order::Provider);
         assert_eq!(store::guide_keys(&conn, "p", view).unwrap().len(), 3);
+    }
+
+    /// An M3U provider (M3U ticket 05) with `epg`, its playlist naming the
+    /// feeds `header`: Harbour One by `tvg-id`, Kestrel by a `tvg-name`
+    /// its title would not match, Summit by its title alone.
+    fn m3u(conn: &mut Connection, epg: Vec<EpgSource>, header: &str) -> Provider {
+        let playlist = format!(
+            "#EXTM3U url-tvg=\"{header}\"\n\
+             #EXTINF:-1 tvg-id=\"h1\",Harbour One\nhttp://s/1\n\
+             #EXTINF:-1 tvg-name=\"Kestrel\",UK: KESTREL ++ FHD\nhttp://s/2\n\
+             #EXTINF:-1,Summit\nhttp://s/3\n"
+        );
+        crate::import::write_playlist(conn, ("p", "P"), playlist.as_bytes(), None, NOW).unwrap();
+        Provider {
+            url: "https://lists.example.net/tv.m3u".into(),
+            username: String::new(),
+            password: String::new(),
+            source: crate::config::Source::M3u,
+            ..provider(epg)
+        }
+    }
+
+    /// Each M3U channel's guide id, in file order.
+    fn m3u_guides(conn: &Connection) -> Vec<Option<String>> {
+        conn.prepare("SELECT guide_id FROM channel ORDER BY num")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn playlist_feeds_fill_the_guides_slot_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = store::open(&dir.path().join("v.db")).unwrap();
+        let (url_a, url_b) = ("http://g.example/a.xml?t=1", "https://g.example/b.xml.xz");
+        let c = url("https://epg.example.net/c.xml");
+        // The feeds sit where the provider's guide does; one an entry
+        // names already is that entry's.
+        let header = format!("{url_a},{url_b},https://epg.example.net/c.xml?t=2");
+        let p = m3u(&mut conn, vec![c.clone(), provider_guide(true)], &header);
+        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let idents: Vec<String> = planned.iter().map(|s| s.source.ident()).collect();
+        assert_eq!(
+            idents,
+            [
+                "https://epg.example.net/c.xml",
+                "http://g.example/a.xml",
+                "https://g.example/b.xml.xz"
+            ]
+        );
+        // A name on the guide's entry is not the feeds'.
+        let mut named = provider_guide(true);
+        named.name = Some("Lists guide".into());
+        let p = m3u(&mut conn, vec![c.clone(), named], &header);
+        let feeds = super::feeds(&conn, &p);
+        assert_eq!(
+            crate::config::feed_labels(&p, &feeds),
+            ["epg.example.net", "P", "a.xml", "b.xml.xz"]
+        );
+        // By file name: a clash numbered, none falling back to the host.
+        let p2 = m3u(
+            &mut conn,
+            vec![provider_guide(true)],
+            "https://h.example/a.xml,https://k.example/a.xml,https://m.example/",
+        );
+        assert_eq!(
+            crate::config::feed_labels(&p2, &super::feeds(&conn, &p2)),
+            ["P", "a.xml", "a.xml 2", "m.example"]
+        );
+        let p = m3u(&mut conn, vec![provider_guide(true), c], &header);
+        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let (a, b, c) = (planned[0].id, planned[1].id, planned[2].id);
+        assert!(planned.iter().all(|s| s.due), "new, so due at once");
+
+        // A has Harbour One; B, xz, has it too, and Kestrel and Summit.
+        let feed_a = doc(
+            &[("h1", "Harbour One")],
+            &[("h1", NOW - H / 2, NOW + H / 2)],
+        );
+        write_source(&mut conn, "p", a, feed_a.as_bytes(), 0, NOW).unwrap();
+        let feed_b = doc(
+            &[("h1", "Harbour"), ("kes", "Kestrel"), ("sum", "Summit")],
+            &[
+                ("h1", NOW - H / 2, NOW + H / 2),
+                ("kes", NOW - H / 2, NOW + H / 2),
+                ("sum", NOW - H / 2, NOW + H / 2),
+            ],
+        );
+        let xz = crate::import::xz(feed_b.as_bytes());
+        assert_eq!(write_source(&mut conn, "p", b, &xz[..], 0, NOW), Ok(3));
+        let gid = |s: i64, id: &str| Some(store::source_guide_id(s, id));
+        assert_eq!(
+            m3u_guides(&conn),
+            [gid(a, "h1"), gid(b, "kes"), gid(b, "sum")]
+        );
+        // A failing feed fails alone and keeps its data.
+        assert!(write_source(&mut conn, "p", a, &b"<tv>"[..], 0, NOW).is_err());
+        write_source(&mut conn, "p", c, doc(&[], &[]).as_bytes(), 0, NOW).unwrap();
+        assert_eq!(m3u_guides(&conn)[0], gid(a, "h1"));
+
+        // The guide's entry off turns its feeds off, their data kept.
+        let p = m3u(&mut conn, vec![provider_guide(false)], &header);
+        let planned = sync(&mut conn, &p, NOW).unwrap();
+        assert!(
+            planned
+                .iter()
+                .all(|s| s.source.ident() == "https://epg.example.net/c.xml")
+        );
+        assert_eq!(m3u_guides(&conn), [None, None, None]);
+        // A feed gone from the header goes, and B takes over.
+        let p = m3u(&mut conn, vec![provider_guide(true)], url_b);
+        let planned = sync(&mut conn, &p, NOW).unwrap();
+        assert_eq!(planned.iter().map(|s| s.id).collect::<Vec<_>>(), [b]);
+        assert_eq!(
+            m3u_guides(&conn),
+            [gid(b, "h1"), gid(b, "kes"), gid(b, "sum")]
+        );
+    }
+
+    /// One feed, 2k channels by 3 days of half hours (288k programmes),
+    /// half of them matched, as gzip and as xz: unpacking alone, then from
+    /// the body to the commit, for `docs/perf/v1.md`:
+    /// `cargo test --release guide_feed_xz_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn guide_feed_xz_time() {
+        use flate2::{Compression, write::GzEncoder};
+        use lzma_rust2::{XzOptions, XzWriter};
+        use std::io::Write;
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = store::open(&dir.path().join("v.db")).unwrap();
+        let names: Vec<(String, String)> = (0..1000)
+            .map(|i| (format!("Channel {i}"), format!("c{i}")))
+            .collect();
+        let chans: Vec<(i64, &str, Option<&str>, i64)> = (0..)
+            .zip(&names)
+            .map(|(i, (n, g))| (i, n.as_str(), Some(g.as_str()), 0))
+            .collect();
+        import_channels(&mut conn, &chans);
+        let source = sync(
+            &mut conn,
+            &provider(vec![url("https://e.example/f.xml")]),
+            NOW,
+        )
+        .unwrap()[0]
+            .id;
+        let mut xml = String::from("<tv>");
+        for c in 0..2000 {
+            xml += &format!(
+                r#"<channel id="c{c}"><display-name>Channel {c}</display-name></channel>"#
+            );
+        }
+        // Words picked by an LCG, so the feed packs about as a real one.
+        const WORDS: [&str; 16] = [
+            "harbour",
+            "summit",
+            "news",
+            "evening",
+            "kestrel",
+            "garden",
+            "match",
+            "live",
+            "weather",
+            "juniper",
+            "quiz",
+            "documentary",
+            "late",
+            "drama",
+            "cobalt",
+            "film",
+        ];
+        let mut seed = 1u64;
+        let mut words = |n: usize| {
+            (0..n)
+                .map(|_| {
+                    seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                    WORDS[(seed >> 60) as usize]
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        for c in 0..2000 {
+            for k in 0..144 {
+                let a = NOW - H + k * 1800;
+                xml += &format!(
+                    r#"<programme start="{}" stop="{}" channel="c{c}"><title>{}</title><desc>{}.</desc></programme>"#,
+                    xmltv_stamp(a, 0),
+                    xmltv_stamp(a + 1800, 0),
+                    words(3),
+                    words(20)
+                );
+            }
+        }
+        xml += "</tv>";
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        gz.write_all(xml.as_bytes()).unwrap();
+        let gz = gz.finish().unwrap();
+        let mut xz = XzWriter::new(Vec::new(), XzOptions::with_preset(6)).unwrap();
+        xz.write_all(xml.as_bytes()).unwrap();
+        let xz = xz.finish().unwrap();
+        eprintln!("{} MB of XML", xml.len() / 1_000_000);
+        for (name, body) in [("gzip", gz), ("xz", xz)] {
+            let t = Instant::now();
+            let n = std::io::copy(&mut unpacked(&body[..]).unwrap(), &mut std::io::sink()).unwrap();
+            let unpack = t.elapsed();
+            let t = Instant::now();
+            let kept = write_source(&mut conn, "p", source, &body[..], 0, NOW).unwrap();
+            eprintln!(
+                "{name}: {:.1} MB, unpacked to {} MB in {} ms; {kept} programmes kept in {} ms",
+                body.len() as f64 / 1e6,
+                n / 1_000_000,
+                unpack.as_millis(),
+                t.elapsed().as_millis()
+            );
+        }
     }
 
     #[test]
@@ -1168,6 +1404,28 @@ mod tests {
         let both = Index::new(&feed, &[name_norm, epg_norm]);
         assert_eq!(both.find(None, "Summit (West)"), Match::Name(1));
         assert_eq!(both.find(None, "UK| Summit"), Match::Ambiguous);
+        // A `tvg-name` before the name at each step (M3U ticket 05): its
+        // exact form before the name's, the name's before its looser one.
+        let feed = [
+            channel("k", &["Kestrel"]),
+            channel("s", &["Summit HD"]),
+            channel("r", &["Rivage"]),
+            channel("r2", &["Rivage"]),
+        ];
+        let ix = Index::new(&feed, &[name_norm, epg_norm]);
+        assert_eq!(
+            ix.find_names(None, &["Kestrel", "Summit HD"]),
+            Match::Name(0)
+        );
+        assert_eq!(
+            ix.find_names(None, &["UK: Kestrel", "Summit HD"]),
+            Match::Name(1)
+        );
+        assert_eq!(
+            ix.find_names(None, &["Rivage", "Summit HD"]),
+            Match::Ambiguous
+        );
+        assert_eq!(ix.find_names(Some("s"), &["Kestrel"]), Match::Id(1));
     }
 
     /// A source fetched at each of `requests`, the last 24 h's.

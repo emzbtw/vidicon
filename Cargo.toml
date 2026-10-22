@@ -21,6 +21,8 @@ flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 libc = "0.2"
 log = "0.4"
+# xz guide feeds (M3U ticket 05): pure Rust, so packages gain no library.
+lzma-rust2 = { version = "0.23", default-features = false, features = ["std", "optimization", "xz"] }
 png = { version = "0.18", optional = true }
 nucleo-matcher = "0.3"
 quick-xml = "0.42"
@@ -39,6 +41,7 @@ unicode-normalization = "0.1"
 slint-build = "1.18"
 
 [dev-dependencies]
+lzma-rust2 = { version = "0.23", default-features = false, features = ["encoder"] }
 tempfile = "3"
 
 # Dependencies (Slint, bundled SQLite) are unusably slow unoptimised; our own

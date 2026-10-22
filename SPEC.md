@@ -170,7 +170,8 @@ user_agent = "Example/1.0"      # optional
   name the playlist by its host or file name, and the database never
   holds it. Each refused key names the provider, never its value.
 - **Guide sources** (EPG sources ticket 02): each `[[provider.epg]]`
-  after its `[[provider]]` is an external XMLTV feed, plain or gzipped,
+  after its `[[provider]]` is an external XMLTV feed, plain, gzipped or
+  xz (M3U ticket 05),
   by an `http(s)` `url` or an absolute `path`, or, with `provider_guide =
   true`, the place of the provider's own `xmltv.php` in the order. The
   order is the file's, the provider's guide first when no entry places
@@ -197,6 +198,18 @@ user_agent = "Example/1.0"      # optional
   provider form (8.2) keeps a provider's sources as they are. The file
   is read at start, so a source edited there is used from the next
   start; each refresh (7.2) stores the order its provider's client has.
+- **An M3U provider's guide** (M3U ticket 05, 7.1): it has no
+  `xmltv.php`, so its `provider_guide` place holds the guide feeds its
+  playlist's `#EXTM3U` line names, nothing written to the file. Its
+  `enabled` and `shift_minutes` apply to each feed; each is otherwise
+  an unnamed URL source with the default limits, and
+  `[[provider.epg]]` entries work as for Xtream. A feed is called by its
+  URL's file name (`uk.xml.xz`), as a playlist's feeds often share one
+  host, else by its host; a name met again gets ` 2` as above. A feed an
+  entry names already (by identity, above) is that entry's, fetched once:
+  so a feed is named, or given its own shift and limits, by adding its
+  URL as an entry, in the file or with Settings › EPG's "Add source…".
+  It then sits where the entry does, and stays if the playlist drops it.
 - Settings › EPG (EPG sources ticket 04, 8.2) adds, edits, reorders,
   turns off and removes the shown provider's sources through the
   settings writer (4.2), under the same checks and modes as the
@@ -320,7 +333,7 @@ All provider data is scoped by `provider_id` (ADR 0001).
 ```
 provider   (id TEXT PK, name, last_channels_refresh INTEGER, last_epg_refresh INTEGER,
             last_movies_refresh INTEGER, last_series_refresh INTEGER,
-            playlist_mtime INTEGER NULL)
+            playlist_mtime INTEGER NULL, playlist_guides TEXT NULL)
 category   (provider_id, kind, category_id TEXT, name, sort INTEGER, shown INTEGER,
             PK (provider_id, kind, category_id))
 channel    (provider_id, stream_id INTEGER, num INTEGER, name, name_norm,
@@ -412,7 +425,8 @@ source_mapping (provider_id, ident, stream_id INTEGER, channel_id, name_norm,
   programmes by it. Matching, per source and redone after each of its
   imports: an exact `epg_channel_id`, then the display name as
   `name_norm`, then, only when that finds nothing, the looser form (6.1);
-  each step counts only on exactly one feed channel.
+  each step counts only on exactly one feed channel. An M3U channel's
+  `tvg-name` is tried before its name at each name step (M3U ticket 05).
 - **Pins and manual mappings** (EPG sources ticket 05, 8.2): a pin puts
   one source, the provider's guide included, first for one channel, with
   `shift_minutes` added to the source's own; a pin to a source turned
@@ -454,7 +468,11 @@ source_mapping (provider_id, ident, stream_id INTEGER, channel_id, name_norm,
   Categories are the groups, by name as their id, in the order first
   met. `extension` is empty and `archive_days` 0.
   `provider.playlist_mtime` is a playlist path's modification time in
-  ns when last read, NULL for a URL.
+  ns when last read, NULL for a URL. `provider.playlist_guides` is the
+  guide feeds its header named at the last import, one URL a line, NULL
+  for none (M3U ticket 05); unlike the playlist's own URL they are kept,
+  as stream URLs are, since a refresh fetches them on their own
+  schedule.
 - Times are Unix seconds, UTC. Display converts to local time.
 - **Kinds** (VOD ticket 02): `kind` is `live`, `movie` or `series`. The
   provider numbers each kind's categories on its own, so the kind is part
@@ -896,6 +914,12 @@ those with the provider's guide). A debug build.
   other than `+`. It crosses regions by design: `UK: Northwind Sport` and
   `4K: Northwind Sport` are one name there. A channel's alternates use it
   too (`channel.name_loose`, 5; 8.2).
+- **xz feeds** (M3U ticket 05): playlists name `.xml.xz` feeds as well
+  as gzipped ones (a list in `research/reference-players.md` section 7
+  names four), so every guide source may be xz. The same synthetic
+  80 MB feed imports in 1.5 to 1.8 s from xz (6.8 MB) against about
+  1.1 s from gzip (9.3 MB): unpacking xz takes about 0.5 s of it
+  (`docs/perf/v1.md`). A background import, so it stays.
 
 ### 6.2 Politeness
 
@@ -1068,7 +1092,9 @@ build.
   its old start, if one starts within 3 hours of it; its padding moves with
   it. Further off is more likely another showing, so no match leaves it.
 - **Guide sources** (EPG sources ticket 02, 4.1): each enabled source is
-  streamed, gunzipped when its first bytes say so, with the same parser,
+  streamed, gunzipped or unpacked from xz when its first bytes say so
+  (M3U ticket 05; a pure-Rust decoder, so packages gain no library), with
+  the same parser,
   into one transaction of its own. Its channels are stored as they come;
   at its first programme (XMLTV lists channels first) the provider's
   channels are matched against them (5), and only matched channels'
@@ -1079,6 +1105,19 @@ build.
   back to its last good data, stores the reason, and is skipped; the
   provider's refresh goes on. Catch-up on a source's programme goes by
   its channel's archive (`archive` is NULL there), at its shifted times.
+  xz's checks fail a cut-off body, and `</tv>` is required whatever the
+  packing.
+- **An M3U provider's guide feeds** (M3U ticket 05, 4.1): `url-tvg` and
+  `x-tvg-url` on the playlist's first line, each a comma-separated list,
+  name its feeds, in that order, each once; only `http(s)` URLs count, so
+  a playlist cannot point the app at a local file. The import stores
+  them with the channels, and a rejected playlist keeps the old ones.
+  The order then holds them in the provider's guide's place, each a
+  source of its own: fetched with conditional requests and the limits of
+  7.2, failing alone, kept, matched and shifted as any other. A feed gone
+  from the header is deleted as a source gone from the file. The
+  refresh that reads a playlist stores its feeds' order before the EPG
+  stage, so new feeds import in that same refresh.
 - **M3U playlists** (M3U ticket 02, 6.4): the provider's playlist is
   read a line at a time, as it downloads or from its file, into one
   transaction that replaces its categories and channels, then the

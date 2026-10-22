@@ -420,6 +420,12 @@ const MIGRATIONS: &[&str] = &[
      UPDATE channel SET url = rtrim(substr(url, 1, instr(url, '|') - 1))
          WHERE instr(url, '|') > 0;
      UPDATE provider SET playlist_mtime = NULL;",
+    // 31: the guide feeds an M3U playlist's header names (M3U ticket 05),
+    // one URL a line, NULL for none. M3U providers' playlists are read
+    // again at once, so their feeds come without waiting 12 h.
+    "ALTER TABLE provider ADD COLUMN playlist_guides TEXT;
+     UPDATE provider SET playlist_mtime = NULL, last_channels_refresh = NULL
+         WHERE id IN (SELECT provider_id FROM channel WHERE url IS NOT NULL);",
 ];
 
 /// Whether a category or title is live, a movie or a series (VOD ticket 02).
@@ -3004,6 +3010,31 @@ pub fn set_playlist_mtime(
     Ok(())
 }
 
+/// The guide feeds the provider's playlist header named when last
+/// imported (M3U ticket 05), in order.
+pub fn playlist_guides(conn: &Connection, provider_id: &str) -> rusqlite::Result<Vec<String>> {
+    let text: Option<String> = conn
+        .prepare_cached("SELECT playlist_guides FROM provider WHERE id = ?1")?
+        .query_row([provider_id], |r| r.get(0))
+        .optional()?
+        .flatten();
+    Ok(text.map_or_else(Vec::new, |t| t.lines().map(str::to_owned).collect()))
+}
+
+/// Stores the guide feeds this import's playlist header names.
+pub fn set_playlist_guides(
+    tx: &Connection,
+    provider_id: &str,
+    guides: &[String],
+) -> rusqlite::Result<()> {
+    let text = (!guides.is_empty()).then(|| guides.join("\n"));
+    tx.execute(
+        "UPDATE provider SET playlist_guides = ?2 WHERE id = ?1",
+        params![provider_id, text],
+    )?;
+    Ok(())
+}
+
 /// Second half: runs the live favourites fallback, for guide pins and
 /// mappings too, applies the category rules
 /// and overrides to the new categories and the channel rules to the new
@@ -3505,26 +3536,38 @@ pub fn insert_source_channel(
     Ok(())
 }
 
-/// The provider's channels, `(stream_id, epg_channel_id, name,
-/// archive_days)`, a row at a time, for matching against a source.
+/// A provider channel as matched against a source.
+pub struct MatchChannel<'a> {
+    pub stream_id: i64,
+    pub epg_channel_id: Option<&'a str>,
+    /// An M3U channel's `tvg-name` (M3U ticket 05).
+    pub tvg_name: Option<&'a str>,
+    pub name: &'a str,
+    pub archive_days: i64,
+}
+
+/// The provider's channels, a row at a time, for matching against a
+/// source.
 pub fn each_channel(
     tx: &Connection,
     provider_id: &str,
-    mut f: impl FnMut(i64, Option<&str>, &str, i64) -> rusqlite::Result<()>,
+    mut f: impl FnMut(MatchChannel) -> rusqlite::Result<()>,
 ) -> rusqlite::Result<()> {
     let mut stmt = tx.prepare(
-        "SELECT stream_id, NULLIF(epg_channel_id, ''), name, archive_days FROM channel
-         WHERE provider_id = ?1",
+        "SELECT stream_id, NULLIF(epg_channel_id, ''), NULLIF(tvg_name, ''), name, archive_days
+         FROM channel WHERE provider_id = ?1",
     )?;
     let mut rows = stmt.query([provider_id])?;
     while let Some(r) = rows.next()? {
         let guide: Option<String> = r.get(1)?;
-        f(
-            r.get(0)?,
-            guide.as_deref(),
-            &r.get::<_, String>(2)?,
-            r.get(3)?,
-        )?;
+        let tvg_name: Option<String> = r.get(2)?;
+        f(MatchChannel {
+            stream_id: r.get(0)?,
+            epg_channel_id: guide.as_deref(),
+            tvg_name: tvg_name.as_deref(),
+            name: &r.get::<_, String>(3)?,
+            archive_days: r.get(4)?,
+        })?;
     }
     Ok(())
 }
@@ -5258,6 +5301,7 @@ mod tests {
                  ALTER TABLE channel DROP COLUMN user_agent;
                  ALTER TABLE channel DROP COLUMN referrer;
                  ALTER TABLE channel DROP COLUMN origin;
+                 ALTER TABLE provider DROP COLUMN playlist_guides;
                  PRAGMA user_version = 29;",
             )
             .unwrap();
@@ -5266,6 +5310,9 @@ mod tests {
         let stream = channel_stream(&conn, "p", 1).unwrap().unwrap();
         assert_eq!(stream.url.as_deref(), Some("http://s/1.ts"));
         assert_eq!(playlist_mtime(&conn, "p").unwrap(), None);
+        // 31: an M3U provider's channels are due, for its header's feeds.
+        assert_eq!(last_refreshes(&conn, "p").unwrap().0, None);
+        assert!(playlist_guides(&conn, "p").unwrap().is_empty());
     }
 
     #[test]
@@ -5288,6 +5335,7 @@ mod tests {
                  ALTER TABLE channel DROP COLUMN user_agent;
                  ALTER TABLE channel DROP COLUMN referrer;
                  ALTER TABLE channel DROP COLUMN origin;
+                 ALTER TABLE provider DROP COLUMN playlist_guides;
                  PRAGMA user_version = 27;",
             )
             .unwrap();

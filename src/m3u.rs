@@ -94,6 +94,15 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// What a read found besides its entries.
+#[derive(Debug, Default, PartialEq)]
+pub struct Summary {
+    /// Entries skipped for having no URL.
+    pub skipped: usize,
+    /// The guide feeds the `#EXTM3U` line names (M3U ticket 05).
+    pub guides: Vec<String>,
+}
+
 /// Why reading stopped: `each` failed, or the body is not a channel list.
 pub enum ReadError<E> {
     Each(E),
@@ -104,19 +113,20 @@ pub enum ReadError<E> {
 const NOT_M3U: &str = "not an M3U playlist: it does not start with #EXTM3U";
 
 /// Reads `body`, handing each entry to `each` in file order. Returns how
-/// many entries were skipped for having no URL. Refuses a body that does
-/// not start with `#EXTM3U` (after a UTF-8 BOM and blank lines) and an
-/// HLS stream playlist (`#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`).
+/// many entries were skipped for having no URL, and the header's guide
+/// feeds. Refuses a body that does not start with `#EXTM3U` (after a
+/// UTF-8 BOM and blank lines) and an HLS stream playlist
+/// (`#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`).
 pub fn read<E>(
     body: impl Read,
     mut each: impl FnMut(Entry) -> Result<(), E>,
-) -> Result<usize, ReadError<E>> {
+) -> Result<Summary, ReadError<E>> {
     let mut body = BufReader::with_capacity(64 * 1024, body);
     let (mut line, mut first, mut header) = (Vec::new(), true, false);
     let mut pending: Option<Entry> = None;
     // `#EXTVLCOPT` headers since the last `#EXTINF` or URL.
     let mut headers = Headers::default();
-    let mut skipped = 0;
+    let (mut skipped, mut guides) = (0, Vec::new());
     loop {
         line.clear();
         let n = body
@@ -134,8 +144,12 @@ pub fn read<E>(
         if text.is_empty() {
             continue;
         }
-        if !std::mem::replace(&mut header, true) && strip_ci(text, "#EXTM3U").is_none() {
-            return Err(ReadError::Body(NOT_M3U.into()));
+        if !std::mem::replace(&mut header, true) {
+            let Some(rest) = strip_ci(text, "#EXTM3U") else {
+                return Err(ReadError::Body(NOT_M3U.into()));
+            };
+            guides = header_guides(rest);
+            continue;
         }
         if let Some(rest) = strip_ci(text, "#EXTINF:") {
             skipped += usize::from(pending.is_some());
@@ -169,7 +183,29 @@ pub fn read<E>(
     if !header {
         return Err(ReadError::Body(NOT_M3U.into()));
     }
-    Ok(skipped + usize::from(pending.is_some()))
+    Ok(Summary {
+        skipped: skipped + usize::from(pending.is_some()),
+        guides,
+    })
+}
+
+/// The guide feeds an `#EXTM3U` line's `url-tvg` and `x-tvg-url` name,
+/// each a comma-separated list, in order, each once. Only `http(s)` URLs:
+/// a playlist does not get to name a local file.
+fn header_guides(rest: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for a in pairs(rest) {
+        if !matches!(a.key.as_str(), "url-tvg" | "x-tvg-url") {
+            continue;
+        }
+        for url in a.value.split(',').map(str::trim) {
+            let web = strip_ci(url, "http://").or_else(|| strip_ci(url, "https://"));
+            if web.is_some_and(|r| !r.is_empty()) && !out.iter().any(|u| u == url) {
+                out.push(url.to_owned());
+            }
+        }
+    }
+    out
 }
 
 /// An `#EXTINF` line's attributes and title, waiting for its URL.
@@ -262,9 +298,17 @@ pub(crate) fn attributes(s: &str) -> (Vec<Attr>, Option<(usize, usize)>) {
         }
         prev = b;
     }
-    let head = first.map_or(s, |i| &s[..i]);
+    (
+        pairs(first.map_or(s, |i| &s[..i])),
+        first.map(|i| (i, commas)),
+    )
+}
+
+/// `key=value` pairs in `s`, values double-quoted, single-quoted or
+/// unquoted; an unquoted value runs to whitespace.
+fn pairs(s: &str) -> Vec<Attr> {
     let mut attrs = Vec::new();
-    let mut rest = head;
+    let mut rest = s;
     loop {
         rest = rest.trim_start();
         if rest.is_empty() {
@@ -300,7 +344,7 @@ pub(crate) fn attributes(s: &str) -> (Vec<Attr>, Option<(usize, usize)>) {
         });
         rest = left;
     }
-    (attrs, first.map(|i| (i, commas)))
+    attrs
 }
 
 #[cfg(test)]
@@ -309,7 +353,7 @@ mod tests {
 
     fn entries(body: &str) -> Result<(Vec<Entry>, usize), String> {
         let mut out = Vec::new();
-        let skipped = read(body.as_bytes(), |e| {
+        let summary = read(body.as_bytes(), |e| {
             out.push(e);
             Ok::<_, ()>(())
         })
@@ -317,7 +361,7 @@ mod tests {
             ReadError::Body(e) => e,
             ReadError::Each(()) => unreachable!(),
         })?;
-        Ok((out, skipped))
+        Ok((out, summary.skipped))
     }
 
     #[test]
@@ -452,6 +496,40 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].title, "Two");
         assert_eq!(skipped, 2);
+    }
+
+    #[test]
+    fn the_header_names_guide_feeds() {
+        let guides = |header: &str| {
+            let body = format!("{header}\n#EXTINF:-1,One\nhttp://s/1\n");
+            read(body.as_bytes(), |_| Ok::<_, ()>(()))
+                .ok()
+                .unwrap()
+                .guides
+        };
+        assert_eq!(guides("#EXTM3U"), Vec::<String>::new());
+        assert_eq!(
+            guides(r#"#EXTM3U url-tvg="http://g.example/a.xml.gz""#),
+            ["http://g.example/a.xml.gz"]
+        );
+        // Comma-separated, both attributes, any quoting and case, each
+        // feed once, in order; a path or another scheme is dropped.
+        assert_eq!(
+            guides(concat!(
+                "#extm3u URL-TVG=' http://g.example/a.xml , https://g.example/b.xml.xz,,/srv/c.xml'",
+                " tvg-shift=1 x-tvg-url=http://g.example/a.xml,ftp://g.example/d.xml,http://h.example/e.xml",
+            )),
+            [
+                "http://g.example/a.xml",
+                "https://g.example/b.xml.xz",
+                "http://h.example/e.xml"
+            ]
+        );
+        // Only the first line is the header.
+        let body =
+            "#EXTM3U\n#EXTM3U url-tvg=\"http://g.example/a.xml\"\n#EXTINF:-1,One\nhttp://s/1\n";
+        let summary = read(body.as_bytes(), |_| Ok::<_, ()>(())).ok().unwrap();
+        assert!(summary.guides.is_empty());
     }
 
     #[test]

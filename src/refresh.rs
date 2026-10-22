@@ -298,11 +298,7 @@ impl Refresher {
         stages: &mut Stages,
     ) -> Result<bool, String> {
         let now = import::unix_now();
-        // The client's, so sources edited in the file since are the ones used.
-        let sources = {
-            let mut conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-            epg_sources::sync(&mut conn, &self.client.provider(), now)?
-        };
+        let mut sources = self.sync_sources(now)?;
         let m3u = self.provider.source == Source::M3u;
         if stages.is_empty() {
             let (channels_at, epg_at) = self.last_refreshes()?;
@@ -379,6 +375,8 @@ impl Refresher {
                         Some((rows, skipped)) => (rows, StageState::DoneSkipping { rows, skipped }),
                         None => (0, StageState::Unchanged),
                     };
+                    // The header may name other guide feeds now (M3U ticket 05).
+                    sources = self.sync_sources(import::unix_now())?;
                     state = Some(s);
                     n
                 }
@@ -408,6 +406,14 @@ impl Refresher {
             ran.push(stage);
         }
         Ok(ran.contains(&Stage::Channels) && ran.contains(&Stage::Epg))
+    }
+
+    /// Stores the provider's guide sources in their order and returns the
+    /// enabled external ones ([`epg_sources::sync`]). The client's
+    /// provider, so sources edited in the file since are the ones used.
+    fn sync_sources(&self, now: i64) -> Result<Vec<Planned>, String> {
+        let mut conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        epg_sources::sync(&mut conn, &self.client.provider(), now)
     }
 
     /// The account check (SPEC 6.3), once per refresh: sends what it found
@@ -471,8 +477,8 @@ impl Refresher {
                 .map_err(|e| format!("reading guide sources: {e}"))?
         };
         let due = force || stale(self.last_refreshes()?.1, import::unix_now(), self.max_age);
-        // An M3U provider has no `xmltv.php` (its playlist's feeds are M3U
-        // ticket 05).
+        // An M3U provider has no `xmltv.php`: its playlist's feeds are
+        // sources in its place (M3U ticket 05).
         let on = on && provider.source == Source::Xtream;
         let mut n = if !due {
             0
@@ -491,8 +497,12 @@ impl Refresher {
             .unwrap_or(stages.len());
         let turns: Vec<&Planned> = sources.iter().filter(|s| force || s.turn).collect();
         // Named as Settings › EPG names them.
-        let order = crate::config::epg_order(provider);
-        let labels = crate::config::epg_labels(provider);
+        let feeds = {
+            let conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+            epg_sources::feeds(&conn, provider)
+        };
+        let order = crate::config::feed_order(provider, &feeds);
+        let labels = crate::config::feed_labels(provider, &feeds);
         let label = |s: &Planned| {
             order
                 .iter()
@@ -1336,6 +1346,61 @@ mod tests {
         age(&setup, 13);
         r.once(false, false).await.unwrap();
         assert_eq!(fake.targets().len(), 2);
+    }
+
+    /// The playlist's guide feeds are imported in the same refresh that
+    /// first reads them, each with its own row (M3U ticket 05).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_playlists_feeds_import_with_it() {
+        let playlist = Arc::new(Mutex::new(String::new()));
+        let serve = playlist.clone();
+        let now = import::unix_now();
+        let feed = format!(
+            r#"<tv><channel id="h"><display-name>Harbour One</display-name></channel><programme start="{}" stop="{}" channel="h"><title>News</title></programme></tv>"#,
+            fake_xtream::xmltv_stamp(now - HOUR, 0),
+            fake_xtream::xmltv_stamp(now + HOUR, 0)
+        );
+        let xz = import::xz(feed.as_bytes());
+        let fake = FakeXtream::start_with(move |target| fake_xtream::Reply {
+            status: 200,
+            body: if target.starts_with("/g.xml.xz") {
+                xz.clone()
+            } else {
+                serve.lock().unwrap().clone().into_bytes()
+            },
+            delay: Duration::ZERO,
+        })
+        .await;
+        *playlist.lock().unwrap() = M3U.replace(
+            "#EXTM3U",
+            &format!("#EXTM3U x-tvg-url=\"{}/g.xml.xz?token=tok-9x\"", fake.url()),
+        );
+        let setup = setup();
+        let (r, mut rx) = m3u_refresher(&setup, format!("{}/tv.m3u", fake.url()));
+        assert_eq!(r.once(false, false).await, Ok(true));
+        let (stages, _) = stages_sent(&mut rx);
+        assert_eq!(
+            stages[1..],
+            [
+                (Stage::Epg, StageState::Done(1)),
+                (
+                    Stage::Source {
+                        label: "g.xml.xz".into(),
+                        reimport: false
+                    },
+                    StageState::Done(1)
+                ),
+            ]
+        );
+        let conn = setup.writer.lock().unwrap();
+        let guided: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM channel WHERE guide_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(guided, 1);
     }
 
     /// A rejected playlist keeps the channels; `run` shows the reason on

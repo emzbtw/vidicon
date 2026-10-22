@@ -3769,18 +3769,19 @@ fn picker_rows(p: &Picker) -> Vec<CardRow> {
 }
 
 /// The name Settings › EPG gives the provider's source `ident`: the
-/// provider's for its own guide (`""`).
-fn guide_label(provider: &Provider, ident: &str) -> String {
+/// provider's for its own guide (`""`). `feeds` are its playlist's
+/// ([`epg_sources::feeds`]).
+fn guide_label(provider: &Provider, feeds: &[EpgSource], ident: &str) -> String {
     if ident.is_empty() {
         return provider.name.clone();
     }
-    let order = config::epg_order(provider);
+    let order = config::feed_order(provider, feeds);
     order
         .iter()
         .position(|s| !s.provider_guide && s.ident() == ident)
         .map_or_else(
             || config::source_label(ident),
-            |i| config::epg_labels(provider)[i].clone(),
+            |i| config::feed_labels(provider, feeds)[i].clone(),
         )
 }
 
@@ -4006,10 +4007,13 @@ fn shown_url(text: &str, revealed: bool) -> String {
 /// Settings › EPG's rows: each of the provider's sources in order, its
 /// place, match counts, requests and last result; then the offer to move a
 /// new source above the provider's guide, while it is below it; then "Add
-/// source…". `busy` are the labels of sources a refresh is importing.
+/// source…". `feeds` and their labels, an M3U provider's playlist feeds,
+/// fill its guide's row. `busy` are the labels of sources a refresh is
+/// importing.
 fn source_items(
     sources: &[EpgSource],
     labels: &[String],
+    feeds: Option<(&[EpgSource], &[String])>,
     provider: &str,
     epg: &EpgView,
     busy: &[&str],
@@ -4021,63 +4025,96 @@ fn source_items(
         kind: SettingKind::Row,
         ..Default::default()
     };
+    let place = |s: &EpgSource| match (&s.url, &s.path) {
+        _ if s.provider_guide => "The provider's own guide (xmltv.php)".to_owned(),
+        (Some(url), _) => shown_url(url, epg.revealed),
+        (None, Some(path)) => path.display().to_string(),
+        (None, None) => String::new(),
+    };
+    // A source's match counts, its requests and last result, and its
+    // last error.
+    let status = |s: &EpgSource, label: &str| {
+        let stats = epg.stats.get(&s.ident()).cloned().unwrap_or_default();
+        let none = (epg.channels - stats.matched - stats.ambiguous).max(0);
+        let counts = if s.provider_guide {
+            format!(
+                "matched {} · none {}",
+                thousands(stats.matched),
+                thousands(none)
+            )
+        } else {
+            format!(
+                "matched {} · ambiguous {} · none {}",
+                thousands(stats.matched),
+                thousands(stats.ambiguous),
+                thousands(none)
+            )
+        };
+        let mut last = Vec::new();
+        if s.url.is_some() {
+            last.push(match s.max_per_day {
+                Some(max) => format!("{}/{max} in 24 h", stats.requests),
+                None => format!("{} in 24 h", count(stats.requests, "request")),
+            });
+        }
+        let mut error = String::new();
+        if !s.enabled {
+            last.push("off: skipped, its data kept".into());
+        } else if busy.contains(&label) && !s.provider_guide {
+            last.push("importing…".into());
+        } else if let Some(t) = stats.retry_at.filter(|&t| t > now) {
+            last.push(format!("busy, asked again after {}", when(t, now)));
+        } else if let Some(e) = &stats.error {
+            last.push("failing".into());
+            error = format!("Last fetch failed: {e}");
+        } else if let Some(t) = stats.imported {
+            last.push(format!("imported {}", when(t, now)));
+        } else {
+            last.push("not fetched yet".into());
+        }
+        if stats.reimport && s.enabled && !busy.contains(&label) {
+            last.push("re-import at the next refresh".into());
+        }
+        (counts, last.join(" · "), error)
+    };
     let mut items: Vec<SettingItem> = sources
         .iter()
         .zip(labels)
         .map(|(s, label)| {
-            let stats = epg.stats.get(&s.ident()).cloned().unwrap_or_default();
-            let place = match (&s.url, &s.path) {
-                _ if s.provider_guide => "The provider's own guide (xmltv.php)".to_owned(),
-                (Some(url), _) => shown_url(url, epg.revealed),
-                (None, Some(path)) => path.display().to_string(),
-                (None, None) => String::new(),
-            };
+            // An M3U provider's guide is its playlist's feeds, each with
+            // its own counts and result (M3U ticket 05).
+            if s.provider_guide
+                && let Some((feeds, feed_labels)) = feeds
+            {
+                let mut note = Vec::new();
+                if feeds.is_empty() {
+                    note.push("The playlist names no guide feed".to_owned());
+                }
+                let mut errors = Vec::new();
+                for (f, l) in feeds.iter().zip(feed_labels) {
+                    note.push(format!("{l}: {}", place(f)));
+                    if !epg.counted {
+                        note.push("counting…".into());
+                        continue;
+                    }
+                    let (counts, last, error) = status(f, l);
+                    note.push(format!("{counts} · {last}"));
+                    if !error.is_empty() {
+                        errors.push(format!("{l}: {error}"));
+                    }
+                }
+                let mut item = row(label, &note.join("\n"));
+                item.value = if s.enabled { "" } else { "Off" }.into();
+                item.error = errors.join("\n").into();
+                return item;
+            }
             if !epg.counted {
-                let mut item = row(label, &format!("{place}\ncounting…"));
+                let mut item = row(label, &format!("{}\ncounting…", place(s)));
                 item.value = if s.enabled { "" } else { "Off" }.into();
                 return item;
             }
-            let none = (epg.channels - stats.matched - stats.ambiguous).max(0);
-            let counts = if s.provider_guide {
-                format!(
-                    "matched {} · none {}",
-                    thousands(stats.matched),
-                    thousands(none)
-                )
-            } else {
-                format!(
-                    "matched {} · ambiguous {} · none {}",
-                    thousands(stats.matched),
-                    thousands(stats.ambiguous),
-                    thousands(none)
-                )
-            };
-            let mut last = Vec::new();
-            if s.url.is_some() {
-                last.push(match s.max_per_day {
-                    Some(max) => format!("{}/{max} in 24 h", stats.requests),
-                    None => format!("{} in 24 h", count(stats.requests, "request")),
-                });
-            }
-            let mut error = String::new();
-            if !s.enabled {
-                last.push("off: skipped, its data kept".into());
-            } else if busy.contains(&label.as_str()) && !s.provider_guide {
-                last.push("importing…".into());
-            } else if let Some(t) = stats.retry_at.filter(|&t| t > now) {
-                last.push(format!("busy, asked again after {}", when(t, now)));
-            } else if let Some(e) = &stats.error {
-                last.push("failing".into());
-                error = format!("Last fetch failed: {e}");
-            } else if let Some(t) = stats.imported {
-                last.push(format!("imported {}", when(t, now)));
-            } else {
-                last.push("not fetched yet".into());
-            }
-            if stats.reimport && s.enabled && !busy.contains(&label.as_str()) {
-                last.push("re-import at the next refresh".into());
-            }
-            let mut item = row(label, &format!("{place}\n{counts}\n{}", last.join(" · ")));
+            let (counts, last, error) = status(s, label);
+            let mut item = row(label, &format!("{}\n{counts}\n{last}", place(s)));
             item.value = if s.enabled { "" } else { "Off" }.into();
             item.error = error.into();
             item
@@ -4103,10 +4140,12 @@ fn source_items(
 /// The source form's rows (EPG sources ticket 04): for the provider's
 /// guide its switch and shift; for another its switch when it is saved,
 /// URL or path, name, shift and limits, then save, then "Remove source…";
-/// or the removal's confirm. `stats` is the saved source's.
+/// or the removal's confirm. `stats` is the saved source's. `playlist`
+/// when the provider's guide is an M3U playlist's feeds (M3U ticket 05).
 fn source_form_items(
     form: &SourceForm,
     label: &str,
+    playlist: bool,
     revealed: bool,
     stats: &store::SourceStats,
 ) -> Vec<SettingItem> {
@@ -4170,7 +4209,9 @@ fn source_form_items(
                 let options: Vec<slint::SharedString> = vec!["On".into(), "Off".into()];
                 let mut item = SettingItem {
                     label: "Enabled".into(),
-                    note: if form.guide {
+                    note: if form.guide && playlist {
+                        "Off skips the playlist's guide feeds and keeps their data"
+                    } else if form.guide {
                         "Off stops xmltv.php and deletes its programmes"
                     } else {
                         "Off skips it and keeps its data, so on again is instant"
@@ -5911,15 +5952,8 @@ impl Screen {
             Some(g) => match store::source_ident(&self.conn, g) {
                 Ok(Some(ident)) => {
                     let provider = self.provider();
-                    let order = config::epg_order(provider);
-                    let at = order
-                        .iter()
-                        .position(|s| !s.provider_guide && s.ident() == ident);
-                    let label = at.map_or_else(
-                        || config::source_label(&ident),
-                        |i| config::epg_labels(provider)[i].clone(),
-                    );
-                    format!("from {label}")
+                    let feeds = epg_sources::feeds(&self.conn, provider);
+                    format!("from {}", guide_label(provider, &feeds, &ident))
                 }
                 Ok(None) => format!("from {}", self.provider().name),
                 Err(e) => {
@@ -8785,7 +8819,8 @@ impl Screen {
                 .and_then(|s| epg.stats.get(&s.ident()))
                 .cloned()
                 .unwrap_or_default();
-            return source_form_items(form, &label, epg.revealed, &stats);
+            let playlist = source.provider.source == config::Source::M3u;
+            return source_form_items(form, &label, playlist, epg.revealed, &stats);
         }
         let busy: Vec<&str> = source
             .stages
@@ -8796,9 +8831,15 @@ impl Screen {
                 _ => None,
             })
             .collect();
+        let feeds = epg_sources::feeds(&self.conn, &source.provider);
+        // The feeds' labels, in the provider's guide's slot.
+        let at = config::guide_slot(&order);
+        let all = config::feed_labels(&source.provider, &feeds);
+        let playlist = source.provider.source == config::Source::M3u;
         source_items(
             &order,
             &labels,
+            playlist.then_some((&feeds[..], &all[at..at + feeds.len()])),
             &source.provider.name,
             epg,
             &busy,
@@ -9197,12 +9238,15 @@ impl Screen {
     /// Reads again what the open card layers show.
     fn load_card(&mut self) {
         let provider_id = self.provider().id.clone();
+        // An M3U provider's own guide is only the slot its feeds fill.
+        let playlist = self.provider().source == config::Source::M3u;
         if let Some(c) = &mut self.card.sources {
             c.sources = store::channel_sources(&self.conn, &provider_id, c.stream_id)
                 .unwrap_or_else(|e| {
                     log::error!("reading guide sources: {e}");
                     Vec::new()
                 });
+            c.sources.retain(|s| !(playlist && s.ident.is_empty()));
             c.selected = c.selected.min(c.sources.len().saturating_sub(1));
         }
         if let Some(a) = &mut self.card.ambiguous {
@@ -9219,6 +9263,7 @@ impl Screen {
     fn show_card(&mut self) {
         let w = self.window();
         let provider = self.provider();
+        let feeds = epg_sources::feeds(&self.conn, provider);
         let (title, hint, query, empty, rows, selected) = if let Some(p) = &self.card.picker {
             let empty = if p.query.trim().is_empty() {
                 format!("No channels from {} yet: it has not been imported", p.label)
@@ -9260,7 +9305,7 @@ impl Screen {
             let rows = c
                 .sources
                 .iter()
-                .map(|s| source_card_row(s, &guide_label(provider, &s.ident)))
+                .map(|s| source_card_row(s, &guide_label(provider, &feeds, &s.ident)))
                 .collect();
             (
                 format!("Guide for {}", c.name),
@@ -9359,7 +9404,11 @@ impl Screen {
             }
             Some((
                 s.id,
-                guide_label(&provider, &s.ident),
+                guide_label(
+                    &provider,
+                    &epg_sources::feeds(&self.conn, &provider),
+                    &s.ident,
+                ),
                 c.stream_id,
                 c.name.clone(),
                 s.mapped.clone(),
@@ -9448,7 +9497,12 @@ impl Screen {
             return;
         };
         let pin = s.pin.is_none().then_some((s.id, 0));
-        let label = guide_label(self.provider(), &s.ident);
+        let provider = self.provider();
+        let label = guide_label(
+            provider,
+            &epg_sources::feeds(&self.conn, provider),
+            &s.ident,
+        );
         let status = match pin {
             Some(_) if !s.enabled => {
                 format!("Pinned to {label}, which is off: it follows the order until it is on")
