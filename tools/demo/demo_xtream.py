@@ -271,6 +271,43 @@ def external_feeds():
     other[first[0] + ".alt"] = (first[0] + ".alt", first[1], None)
     return external(list(match.values()), 0).encode(), gzip.compress(external(list(other.values()), 3600).encode())
 
+# An invented M3U playlist of the same channels (M3U ticket 02), each
+# streaming from `/live/` as the Xtream ones do, with the forms real lists
+# use: CRLF, a duplicate `tvg-id` with a backup URL, one stream in two
+# groups, a blank line and a comment inside an entry, unquoted attributes,
+# a title with a comma, a long URL with a token, a URL with no `#EXTINF`,
+# an `#EXTINF` with no URL (skipped and counted) and an
+# `#EXT-X-CREDENTIALS` line, which is skipped.
+def playlist():
+    names = {c["category_id"]: c["category_name"] for c in categories}
+    live = lambda sid: f"http://127.0.0.1:{PORT}/live/demo/demo/{sid}.ts"
+    out = ["#EXTM3U", "#EXT-X-CREDENTIALS:none"]
+    for i, s in enumerate(streams):
+        group, title, url = names[s["category_id"]], s["name"], live(s["stream_id"])
+        if i == 2:
+            title += ", London"
+        if i == 5:
+            url += "?token=" + "".join(random.Random(5).choices("abcdef0123456789", k=1500))
+        if i % 7 == 3 and s["epg_channel_id"]:
+            attrs = f'tvg-id={s["epg_channel_id"]} tvg-chno={s["num"]}'
+        else:
+            attrs = f'tvg-name="{s["name"]}" tvg-chno="{s["num"]}"'
+            if s["epg_channel_id"]:
+                attrs = f'tvg-id="{s["epg_channel_id"]}" ' + attrs
+        attrs += f' tvg-logo="{s["stream_icon"]}" group-title="{group}"'
+        out.append(f"#EXTINF:-1 {attrs},{title}")
+        if i == 4:
+            out += ["", "# the backup feed is below"]
+        out.append(url)
+        if i == 0:
+            # A backup stream under the same `tvg-id`.
+            out += [f"#EXTINF:-1 {attrs},{title} (backup)", url + "?backup=1"]
+        if i == 1:
+            # The same stream in a second group.
+            out += [f'#EXTINF:-1 {attrs.replace(group, "Highlights")},{title}', url]
+    out += [live(9999), "#EXTINF:-1,Gone"]
+    return ("\r\n".join(out) + "\r\n").encode()
+
 def table(stream_id):
     """`get_simple_data_table`: the channel's guide, older days included,
     titles and descriptions base64, `has_archive` on those its archive keeps."""
@@ -465,6 +502,7 @@ FAIL = os.environ.get("DEMO_FAIL", "").partition(":")
 START = time.monotonic()
 
 EXTERNAL = external_feeds()
+PLAYLIST = playlist()
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -514,6 +552,23 @@ class H(BaseHTTPRequestHandler):
             self.send_header("ETag", etag)
             self.end_headers()
             self.wfile.write(body)
+            return
+        if u.path == "/playlist.m3u":
+            if FAIL[0] == "playlist":
+                self.send_error(int(FAIL[2]))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/x-mpegurl")
+            self.send_header("Content-Length", str(len(PLAYLIST)))
+            self.end_headers()
+            if SLOW[0] == "playlist":
+                step = len(PLAYLIST) // 40 + 1
+                for i in range(0, len(PLAYLIST), step):
+                    self.wfile.write(PLAYLIST[i:i + step])
+                    self.wfile.flush()
+                    time.sleep(float(SLOW[2]) / 40)
+                return
+            self.wfile.write(PLAYLIST)
             return
         if u.path.startswith("/live/"):
             self.live(u.path.rsplit("/", 1)[-1].split(".")[0])

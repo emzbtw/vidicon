@@ -1,7 +1,7 @@
 //! Refresh scheduling (SPEC 7.2): decides when to refresh, runs the imports
 //! in the background, and reports what it is doing to the UI.
 
-use crate::config::Provider;
+use crate::config::{Provider, Source};
 use crate::epg_sources::{self, Meter, Outcome, Planned};
 use crate::import::{self, Writer};
 use crate::store;
@@ -105,6 +105,12 @@ pub enum StageState {
     },
     /// Rows imported.
     Done(usize),
+    /// An M3U playlist's channels imported, and its entries skipped for
+    /// having no URL (M3U ticket 02).
+    DoneSkipping {
+        rows: usize,
+        skipped: usize,
+    },
     /// A guide source the server said has not changed.
     Unchanged,
     /// A guide source not asked: `count` of its `max` requests made in
@@ -175,6 +181,11 @@ fn is_source(stage: &Stage) -> bool {
     matches!(stage, Stage::Source { .. })
 }
 
+/// A stage that has finished, so a retry skips it.
+fn done(state: &StageState) -> bool {
+    matches!(state, StageState::Done(_) | StageState::DoneSkipping { .. })
+}
+
 /// Data never fetched, or fetched `max_age` or more seconds ago.
 fn stale(last: Option<i64>, now: i64, max_age: i64) -> bool {
     last.is_none_or(|t| now - t >= max_age)
@@ -225,7 +236,7 @@ impl Refresher {
                 // check failed.
                 if let Some((_, state)) = stages
                     .iter_mut()
-                    .find(|(stage, s)| !is_source(stage) && !matches!(s, StageState::Done(_)))
+                    .find(|(stage, s)| !is_source(stage) && !done(s))
                 {
                     *state = match retry_at {
                         Some(retry_at) => StageState::Backoff { retry_at },
@@ -292,6 +303,7 @@ impl Refresher {
             let mut conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
             epg_sources::sync(&mut conn, &self.client.provider(), now)?
         };
+        let m3u = self.provider.source == Source::M3u;
         if stages.is_empty() {
             let (channels_at, epg_at) = self.last_refreshes()?;
             let (movies_at, series_at) = {
@@ -308,27 +320,99 @@ impl Refresher {
             // A source due makes the guide due, so one added to the file, or
             // with a shorter `every_hours`, does not wait for the provider's.
             let source_due = sources.iter().any(|s| s.due);
+            // A playlist path is read again when it changes, not by age.
+            let changed = if m3u {
+                import::playlist_changed(&self.writer, &self.client.provider())
+            } else {
+                None
+            };
             stages.extend(
                 ages.into_iter()
+                    // An M3U provider has no movies or series.
+                    .filter(|(stage, ..)| !m3u || matches!(stage, Stage::Channels | Stage::Epg))
                     .filter(|(stage, at, max_age)| {
-                        force || stale(*at, now, *max_age) || *stage == Stage::Epg && source_due
+                        force
+                            || match changed {
+                                Some(changed) if *stage == Stage::Channels => changed,
+                                _ => stale(*at, now, *max_age),
+                            }
+                            || *stage == Stage::Epg && source_due
                     })
                     .map(|(stage, ..)| (stage, StageState::Waiting)),
             );
         } else {
             for (stage, state) in stages.iter_mut() {
-                if !is_source(stage) && !matches!(state, StageState::Done(_)) {
+                if !is_source(stage) && !done(state) {
                     *state = StageState::Waiting;
                 }
             }
         }
+        // An M3U provider has no account to check.
+        let check_account = check_account && !m3u;
         if stages.is_empty() && !check_account {
             return Ok(false);
         }
         if !stages.is_empty() {
             self.send(Update::Stages(stages.clone()));
         }
+        let ext = if m3u { "" } else { self.account(now).await? };
 
+        let mut ran = Vec::new();
+        // The EPG stage adds its sources' rows after its own.
+        let mut next = 0;
+        while next < stages.len() {
+            let i = next;
+            next += 1;
+            if is_source(&stages[i].0) || done(&stages[i].1) {
+                continue;
+            }
+            let stage = stages[i].0.clone();
+            // The client's, so a name edited in Settings is the one stored.
+            let provider = self.client.provider();
+            let (client, writer, provider) = (&self.client, &self.writer, &provider);
+            let mut state = None;
+            let n = match stage {
+                Stage::Channels if provider.source == Source::M3u => {
+                    let import = import::playlist(client, writer, provider, force);
+                    let (n, s) = match self.progress(stages, i, import).await? {
+                        Some((rows, 0)) => (rows, StageState::Done(rows)),
+                        Some((rows, skipped)) => (rows, StageState::DoneSkipping { rows, skipped }),
+                        None => (0, StageState::Unchanged),
+                    };
+                    state = Some(s);
+                    n
+                }
+                Stage::Channels => {
+                    let import = import::channels(client, writer, provider, ext);
+                    self.progress(stages, i, import).await?
+                }
+                Stage::Epg => self.epg(stages, i, provider, &sources, force).await?,
+                Stage::Movies => {
+                    self.progress(stages, i, import::movies(client, writer, provider))
+                        .await?
+                }
+                Stage::Series => {
+                    self.progress(stages, i, import::series(client, writer, provider))
+                        .await?
+                }
+                Stage::Source { .. } => continue,
+            };
+            stages[i].1 = state.unwrap_or(StageState::Done(n));
+            self.send(Update::Stages(stages.clone()));
+            self.send(match stage {
+                Stage::Channels => Update::Channels(n),
+                Stage::Epg | Stage::Source { .. } => Update::Epg(n),
+                Stage::Movies => Update::Movies(n),
+                Stage::Series => Update::Series(n),
+            });
+            ran.push(stage);
+        }
+        Ok(ran.contains(&Stage::Channels) && ran.contains(&Stage::Epg))
+    }
+
+    /// The account check (SPEC 6.3), once per refresh: sends what it found
+    /// and returns the stream extension, or why refresh is paused.
+    async fn account(&self, now: i64) -> Result<&'static str, String> {
         self.send(Update::Busy("Checking account…".into()));
         let xtream::Account {
             user_info: user,
@@ -364,46 +448,7 @@ impl Refresher {
             None => {}
         }
 
-        let mut ran = Vec::new();
-        // The EPG stage adds its sources' rows after its own.
-        let mut next = 0;
-        while next < stages.len() {
-            let i = next;
-            next += 1;
-            if is_source(&stages[i].0) || matches!(stages[i].1, StageState::Done(_)) {
-                continue;
-            }
-            let stage = stages[i].0.clone();
-            // The client's, so a name edited in Settings is the one stored.
-            let provider = self.client.provider();
-            let (client, writer, provider) = (&self.client, &self.writer, &provider);
-            let n = match stage {
-                Stage::Channels => {
-                    let import = import::channels(client, writer, provider, ext);
-                    self.progress(stages, i, import).await?
-                }
-                Stage::Epg => self.epg(stages, i, provider, &sources, force).await?,
-                Stage::Movies => {
-                    self.progress(stages, i, import::movies(client, writer, provider))
-                        .await?
-                }
-                Stage::Series => {
-                    self.progress(stages, i, import::series(client, writer, provider))
-                        .await?
-                }
-                Stage::Source { .. } => continue,
-            };
-            stages[i].1 = StageState::Done(n);
-            self.send(Update::Stages(stages.clone()));
-            self.send(match stage {
-                Stage::Channels => Update::Channels(n),
-                Stage::Epg | Stage::Source { .. } => Update::Epg(n),
-                Stage::Movies => Update::Movies(n),
-                Stage::Series => Update::Series(n),
-            });
-            ran.push(stage);
-        }
-        Ok(ran.contains(&Stage::Channels) && ran.contains(&Stage::Epg))
+        Ok(ext)
     }
 
     /// The EPG stage, stage `i`: the provider's guide unless it is off, or
@@ -426,6 +471,9 @@ impl Refresher {
                 .map_err(|e| format!("reading guide sources: {e}"))?
         };
         let due = force || stale(self.last_refreshes()?.1, import::unix_now(), self.max_age);
+        // An M3U provider has no `xmltv.php` (its playlist's feeds are M3U
+        // ticket 05).
+        let on = on && provider.source == Source::Xtream;
         let mut n = if !due {
             0
         } else if on {
@@ -1195,5 +1243,164 @@ mod tests {
         assert_eq!(fake.actions()[8..], ["account"]);
         drop(manual_tx);
         task.await.unwrap();
+    }
+
+    /// The last stages sent, and every update.
+    fn stages_sent(rx: &mut mpsc::UnboundedReceiver<Update>) -> (Stages, Vec<Update>) {
+        let updates = drain(rx);
+        let stages = updates
+            .iter()
+            .filter_map(|u| match u {
+                Update::Stages(s) => Some(s.clone()),
+                _ => None,
+            })
+            .next_back()
+            .unwrap_or_default();
+        (stages, updates)
+    }
+
+    fn m3u_refresher(setup: &Setup, url: String) -> (Refresher, mpsc::UnboundedReceiver<Update>) {
+        let provider = Provider {
+            id: "p".into(),
+            name: "Lists".into(),
+            url,
+            username: String::new(),
+            password: String::new(),
+            epg: Vec::new(),
+            source: Source::M3u,
+            user_agent: Some("Example/1.0".into()),
+        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        let r = Refresher {
+            client: Arc::new(Client::with_limits(provider.clone(), FAST)),
+            writer: setup.writer.clone(),
+            provider,
+            max_age: 12 * HOUR,
+            check_every: Duration::from_secs(3600),
+            updates: tx,
+        };
+        (r, rx)
+    }
+
+    const M3U: &str = "#EXTM3U\n#EXTINF:-1 tvg-id=\"harbour.uk\",Harbour One\nhttp://s/h\n#EXTINF:-1,Lost\n#EXTINF:-1 group-title=\"News\",Juniper\nhttp://s/j\n";
+
+    /// An M3U provider by URL: one GET with its user agent, no account,
+    /// no movies or series, and its URL nowhere in the log (M3U ticket 02).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_m3u_url_is_one_get_with_its_user_agent() {
+        let logs = fake_xtream::capture_logs();
+        let heads: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = heads.clone();
+        let fake = FakeXtream::start_head(move |head| {
+            seen.lock().unwrap().push(head.to_ascii_lowercase());
+            let reply = fake_xtream::Reply {
+                status: 200,
+                body: M3U.into(),
+                delay: Duration::ZERO,
+            };
+            (reply, String::new())
+        })
+        .await;
+        let setup = setup();
+        let url = format!("{}/lists/tv.m3u?token=tok-9x", fake.url());
+        let (r, mut rx) = m3u_refresher(&setup, url);
+        assert_eq!(r.once(false, true).await, Ok(true));
+        assert_eq!(fake.targets(), ["/lists/tv.m3u?token=tok-9x"]);
+        assert!(heads.lock().unwrap()[0].contains("user-agent: example/1.0"));
+        assert_eq!(channel_count(&setup), 2);
+        let (stages, updates) = stages_sent(&mut rx);
+        assert_eq!(
+            stages,
+            [
+                (
+                    Stage::Channels,
+                    StageState::DoneSkipping {
+                        rows: 2,
+                        skipped: 1
+                    }
+                ),
+                (Stage::Epg, StageState::Done(0)),
+            ]
+        );
+        assert!(!updates.iter().any(|u| matches!(u, Update::Account(_))));
+        let logged = logs.lock().unwrap().join("\n");
+        assert!(
+            !logged.contains("tok-9x") && !logged.contains("/lists/"),
+            "{logged}"
+        );
+
+        // Fresh, and the dashboard asking: nothing to do.
+        assert_eq!(r.once(false, true).await, Ok(false));
+        assert_eq!(fake.targets().len(), 1);
+        // Stale by age, as an Xtream list is.
+        age(&setup, 13);
+        r.once(false, false).await.unwrap();
+        assert_eq!(fake.targets().len(), 2);
+    }
+
+    /// A rejected playlist keeps the channels; `run` shows the reason on
+    /// the stage, as for any failed stage.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_rejected_playlist_keeps_the_channels() {
+        let body = Arc::new(Mutex::new(M3U.to_string()));
+        let serve = body.clone();
+        let fake = FakeXtream::start_with(move |_| fake_xtream::Reply {
+            status: 200,
+            body: serve.lock().unwrap().clone().into_bytes(),
+            delay: Duration::ZERO,
+        })
+        .await;
+        let setup = setup();
+        let (r, mut rx) = m3u_refresher(&setup, format!("{}/tv.m3u", fake.url()));
+        r.once(false, false).await.unwrap();
+        *body.lock().unwrap() = "#EXTM3U\n#EXT-X-TARGETDURATION:6\nseg.ts\n".into();
+        drain(&mut rx);
+        let err = r.once(true, false).await.unwrap_err();
+        assert!(err.contains("a stream, not a channel list"), "{err}");
+        assert_eq!(channel_count(&setup), 2);
+    }
+
+    /// A playlist path is read again when its modification time changes,
+    /// or on `r`, not by age.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_m3u_path_is_read_when_it_changes() {
+        let setup = setup();
+        let file = setup._dir.path().join("tv.m3u");
+        std::fs::write(&file, M3U).unwrap();
+        let (r, mut rx) = m3u_refresher(&setup, file.display().to_string());
+        r.once(false, false).await.unwrap();
+        assert_eq!(channel_count(&setup), 2);
+        // Old, but unchanged: the guide is due, not the channels.
+        age(&setup, 13);
+        drain(&mut rx);
+        r.once(false, false).await.unwrap();
+        let (stages, _) = stages_sent(&mut rx);
+        assert_eq!(stages, [(Stage::Epg, StageState::Done(0))]);
+        // Changed: read again.
+        std::fs::write(&file, format!("{M3U}#EXTINF:-1,Kestrel\nhttp://s/k\n")).unwrap();
+        let later = std::time::SystemTime::now() + Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        r.once(false, false).await.unwrap();
+        assert_eq!(channel_count(&setup), 3);
+        let (stages, _) = stages_sent(&mut rx);
+        assert_eq!(stages[0].0, Stage::Channels);
+        // `r` reads it unchanged.
+        r.once(true, false).await.unwrap();
+        let (stages, _) = stages_sent(&mut rx);
+        assert_eq!(
+            stages[0],
+            (
+                Stage::Channels,
+                StageState::DoneSkipping {
+                    rows: 3,
+                    skipped: 1
+                }
+            )
+        );
     }
 }

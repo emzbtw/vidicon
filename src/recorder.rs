@@ -1276,6 +1276,8 @@ exit 1
                 username: "user".into(),
                 password: "secret".into(),
                 epg: Vec::new(),
+                source: crate::config::Source::Xtream,
+                user_agent: None,
             };
             let clients = [("p".to_string(), Arc::new(Client::new(provider)))]
                 .into_iter()
@@ -1345,6 +1347,8 @@ exit 1
             icon_url: None,
             extension: "ts",
             archive_days: 0,
+            url: None,
+            tvg_name: None,
         };
         store::insert_channel(&tx, "p", &c).unwrap();
         store::finish_channel_import(&tx, "p", 0).unwrap();
@@ -2020,6 +2024,8 @@ exit 1
             username: "demo".into(),
             password: "demo".into(),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         };
         let clients = [("p".to_string(), Arc::new(Client::new(provider)))]
             .into_iter()

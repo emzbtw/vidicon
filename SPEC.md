@@ -81,7 +81,7 @@ Single process, three concerns on separate threads:
    ▼                               │
  Store (SQLite, WAL) ◄── writes ── Worker runtime (tokio)
                                      ├─ Xtream client (rate-limited HTTP)
-                                     ├─ Importer (streaming JSON + XMLTV)
+                                     ├─ Importer (streaming JSON, M3U + XMLTV)
                                      ├─ Refresh scheduler
                                      └─ Player controller (mpv JSON IPC)
 ```
@@ -96,7 +96,8 @@ Single process, three concerns on separate threads:
 | Module | Responsibility |
 |---|---|
 | `config` | Paths, `config.toml`, credential file loading and permission check. |
-| `xtream` | HTTP client for `player_api.php` and `xmltv.php`; rate limiting; credential redaction. |
+| `xtream` | HTTP client for `player_api.php` and `xmltv.php`, and an M3U provider's playlist; rate limiting; credential redaction. |
+| `m3u` | Reads an M3U playlist an entry at a time (6.4, M3U ticket 02). |
 | `store` | Schema, migrations, paged queries, search. |
 | `import` | Streams provider responses into the store in one transaction per import. |
 | `refresh` | Decides when to refresh; runs imports; reports status. |
@@ -111,7 +112,7 @@ Single process, three concerns on separate threads:
 |---|---|
 | Settings | `$XDG_CONFIG_HOME/vidicon/config.toml` |
 | Credentials | `$XDG_CONFIG_HOME/vidicon/credentials.toml` (override: `--credentials <path>` or `VIDICON_CREDENTIALS`) |
-| Database | `$XDG_DATA_HOME/vidicon/vidicon.db` |
+| Database | `$XDG_DATA_HOME/vidicon/vidicon.db`, set `0600` on open: an M3U channel's URL can carry the account |
 | mpv socket | `$XDG_RUNTIME_DIR/vidicon/mpv.sock` |
 | Logs | stderr only in v1 |
 
@@ -137,6 +138,13 @@ max_per_day = 20                # optional, a url's, at least 3; default none
 
 [[provider.epg]]
 provider_guide = true           # where the provider's own xmltv.php goes; first if absent
+
+[[provider]]                    # an M3U playlist (M3U ticket 02)
+id = "lists"
+name = "Public lists"
+type = "m3u"                    # "xtream" when absent
+url = "https://lists.example.net/tv.m3u"  # or an absolute path
+user_agent = "Example/1.0"      # optional
 ```
 
 - The file is checked at start in this order (onboarding ticket 03):
@@ -153,6 +161,14 @@ provider_guide = true           # where the provider's own xmltv.php goes; first
   does not resolve into the Nix store.
 - A parse error names the line and never quotes a value. A duplicate
   `id` is refused the same way.
+- **Provider types** (M3U ticket 02): `type` is `xtream`, the default,
+  or `m3u`. An Xtream provider needs `username` and `password` and
+  takes no `user_agent`. An M3U provider's `url` is an `http(s)` URL or
+  an absolute path to its playlist, and `user_agent`, when given, is
+  sent for the playlist instead of `vidicon/<version>`. A playlist URL
+  often holds a token, so it is as secret as a password: logs and errors
+  name the playlist by its host or file name, and the database never
+  holds it. Each refused key names the provider, never its value.
 - **Guide sources** (EPG sources ticket 02): each `[[provider.epg]]`
   after its `[[provider]]` is an external XMLTV feed, plain or gzipped,
   by an `http(s)` `url` or an absolute `path`, or, with `provider_guide =
@@ -303,7 +319,8 @@ All provider data is scoped by `provider_id` (ADR 0001).
 
 ```
 provider   (id TEXT PK, name, last_channels_refresh INTEGER, last_epg_refresh INTEGER,
-            last_movies_refresh INTEGER, last_series_refresh INTEGER)
+            last_movies_refresh INTEGER, last_series_refresh INTEGER,
+            playlist_mtime INTEGER NULL)
 category   (provider_id, kind, category_id TEXT, name, sort INTEGER, shown INTEGER,
             PK (provider_id, kind, category_id))
 channel    (provider_id, stream_id INTEGER, num INTEGER, name, name_norm,
@@ -350,8 +367,8 @@ download   (id INTEGER PK, provider_id, kind, stream_id INTEGER, series_id NULL,
 
 `channel` also has `shown INTEGER` (ticket 25), derived like
 `category.shown`; see the channel rules and kept tags below,
-`archive_days INTEGER` (catch-up ticket 02), and `guide_id` (EPG sources
-ticket 02, below).
+`archive_days INTEGER` (catch-up ticket 02), `guide_id` (EPG sources
+ticket 02, below), and `url` and `tvg_name` (M3U ticket 02, below).
 
 ```
 epg_source     (id INTEGER PK, provider_id, ident, position INTEGER, enabled INTEGER,
@@ -423,6 +440,19 @@ source_mapping (provider_id, ident, stream_id INTEGER, channel_id, name_norm,
   unless the confirm's "Also delete" is on (8.2). Written on the writer
   connection like favourites.
 
+- **M3U channels** (M3U ticket 02, 6.4, 7.1): an M3U provider's
+  entries are all live channels. `url` is the entry's stream URL as the
+  playlist gives it, any `|` suffix of headers included, NULL on an
+  Xtream channel; `tvg_name` its `tvg-name`, for guide matching.
+  `stream_id` is a stable 63-bit hash (FNV-1a, the same in every build)
+  of the entry's key, `tvg-id`, else `tvg-name`, else the title: the
+  key's alone for the first entry with that key, so a backup added after
+  a channel leaves its id alone; for a later one, with its URL's hash
+  (without the suffix) and its place among the entries sharing both.
+  Categories are the groups, by name as their id, in the order first
+  met. `extension` is empty and `archive_days` 0.
+  `provider.playlist_mtime` is a playlist path's modification time in
+  ns when last read, NULL for a URL.
 - Times are Unix seconds, UTC. Display converts to local time.
 - **Kinds** (VOD ticket 02): `kind` is `live`, `movie` or `series`. The
   provider numbers each kind's categories on its own, so the kind is part
@@ -995,11 +1025,12 @@ build.
   order, and no `tvg-name` under the generator's 13.7k unique
   `tvg-id`s. Neither list showed a reorder or a rotated token, so this
   is a judgement more than a measurement: identity is `tvg-id`, else
-  `tvg-name`, else the title; duplicates are told apart by a URL hash,
-  which survives the reorder that adding channels causes, with an
-  occurrence index only among entries that share the URL too. A
-  rotated token changes a duplicate's id; the favourites name fallback
-  covers it.
+  `tvg-name`, else the title; the first entry with a key has the key's
+  hash alone, later duplicates are told apart by a URL hash, which
+  survives the reorder that adding channels causes, with an occurrence
+  index only among entries that share the URL too. A rotated token
+  changes a later duplicate's id; the favourites name fallback covers
+  it when the names differ. Duplicates that swap places change ids.
 - **`get.php` refused:** the provider's own playlist URL answers HTTP
   884 with an empty body, from a proxy in front of the panel, for any
   user agent, `type` and `output`, while `player_api.php` works. A
@@ -1046,6 +1077,30 @@ build.
   back to its last good data, stores the reason, and is skipped; the
   provider's refresh goes on. Catch-up on a source's programme goes by
   its channel's archive (`archive` is NULL there), at its shifted times.
+- **M3U playlists** (M3U ticket 02, 6.4): the provider's playlist is
+  read a line at a time, as it downloads or from its file, into one
+  transaction that replaces its categories and channels, then the
+  favourites fallback and the rest of a channel import run. An entry runs
+  from `#EXTINF` to the next non-empty line that is not a `#` line, its
+  URL, with no scheme or length check; `#EXTVLCOPT`, `#KODIPROP`, other
+  `#` lines and blank lines are skipped. A URL with no `#EXTINF` is kept,
+  named after its path's last segment; an `#EXTINF` with no URL is
+  skipped and counted, shown in the refresh panel (`12 entries
+  skipped`). A UTF-8 BOM, CRLF, attribute values double-quoted,
+  single-quoted or unquoted, and commas in quoted values and in the
+  title (everything after the first comma outside quotes) are taken.
+  The title is the name, else `tvg-name`; `tvg-id` the `epg_channel_id`;
+  `tvg-logo`, `tvg-icon` or `logo` the logo; `group-title` or `group`,
+  its first `;`-separated value, the category, else "Uncategorised";
+  `tvg-chno` or `tvg-ch`, when a number, the number, else its place
+  among the entries. Ids are given at the end of the import from a
+  temporary table of hashes (5), so the list is never in memory. The
+  playlist is rejected, keeping the stored channels, when it does not
+  start with `#EXTM3U`, when the download is shorter than its
+  `Content-Length`, when it has no entries, and when it is an HLS stream
+  playlist (`#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`: "this is a
+  stream, not a channel list"). Measured: 50k entries from request to
+  commit in about 2 to 3 s (`docs/perf/v1.md`).
 - **Movies and series** (VOD ticket 02): `get_vod_categories` then
   `get_vod_streams`, and `get_series_categories` then `get_series`, each
   streamed into one transaction as channels are, replacing that kind's
@@ -1097,6 +1152,13 @@ build.
   body read of its fetch, which does not go through the provider's
   client. A source not due on a scheduled pass, one whose file has not
   changed included, has no row.
+- **M3U providers** (M3U ticket 02): a refresh is the channels and EPG
+  stages only, with no account check and no movies or series. A playlist
+  URL is one GET through the provider's client, under the limits of 6.2,
+  on the same schedule and `r`; a playlist path is read again when its
+  modification time differs from the last read's, or on `r`, not by age.
+  The EPG stage has no `xmltv.php` to fetch; external guide sources run
+  as for any provider.
 - An edit in Settings › EPG (4.1) asks the provider's refresher for a
   pass at once, as `refresh_hours` does; one asked while a refresh runs
   follows it.

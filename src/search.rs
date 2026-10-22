@@ -533,6 +533,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days: 0,
+                url: None,
+                tvg_name: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }
@@ -586,6 +588,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days: 0,
+                url: None,
+                tvg_name: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }

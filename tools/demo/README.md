@@ -99,6 +99,24 @@ url = "http://127.0.0.1:47811/epg/other.xml.gz?token=demo"
 shift_minutes = -60
 ```
 
+`/playlist.m3u` (M3U ticket 02, any query string accepted as a token)
+is an invented M3U playlist of the same channels, each streaming from
+`/live/` as the Xtream ones do, in CRLF, with the forms real lists use: a
+backup stream under the same key, one stream in two groups (`Highlights`
+too), a blank line and a comment inside an entry, unquoted attributes, a
+title with a comma, a URL with a 1.5k-character token, a URL with no
+`#EXTINF`, an `#EXTINF` with no URL (`1 entry skipped`) and an
+`#EXT-X-CREDENTIALS` line. `DEMO_SLOW=playlist:20` and
+`DEMO_FAIL=playlist:503` work on it.
+
+```toml
+[[provider]]
+id = "lists"
+name = "Demo Lists"
+type = "m3u"
+url = "http://127.0.0.1:47811/playlist.m3u?token=demo"
+```
+
 `demo_xtream.py <port> <channels>` adds generated categories after that set
 until there are `<channels>` channels, each logo shared by a few of them:
 `demo_xtream.py 47811 50000` is the provider `docs/perf/v1.md` was measured

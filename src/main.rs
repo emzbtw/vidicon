@@ -8,6 +8,7 @@ mod fake_xtream;
 mod import;
 mod info;
 mod logos;
+mod m3u;
 mod player;
 #[cfg(feature = "devtools")]
 mod probe;

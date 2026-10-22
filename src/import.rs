@@ -8,6 +8,7 @@
 //! previous data untouched.
 
 use crate::config::Provider;
+use crate::m3u;
 use crate::store::{self, Kind, NewChannel, NewMovie, NewProgramme, NewSeries};
 use crate::xtream::{Chunk, Client, Movie, Series, Stream};
 use bytes::{Buf, Bytes};
@@ -18,6 +19,7 @@ use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, SeqAccess, Visi
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read};
 use std::marker::PhantomData;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -65,6 +67,87 @@ pub async fn channels(
     // A network error explains a parse error, so it wins.
     fetched?;
     stored
+}
+
+/// Imports an M3U provider's playlist (M3U ticket 02), fetched through its
+/// client, or read from its path when the file changed since the last
+/// read (`force` reads it anyway). Returns the channels imported and the
+/// entries skipped for having no URL, or `None` for a path unchanged.
+pub async fn playlist(
+    client: &Client,
+    writer: &Writer,
+    provider: &Provider,
+    force: bool,
+) -> Result<Option<(usize, usize)>, String> {
+    let t = std::time::Instant::now();
+    let label = provider.playlist_label();
+    let path = provider.playlist_path();
+    let mtime = if let Some(path) = path {
+        let mtime = file_mtime(path).map_err(|e| format!("{}: {label}: {e}", provider.name))?;
+        let stored = {
+            let conn = writer.lock().unwrap_or_else(|e| e.into_inner());
+            store::playlist_mtime(&conn, &provider.id)
+                .map_err(|e| format!("reading provider: {e}"))?
+        };
+        if !force && stored == Some(mtime) {
+            return Ok(None);
+        }
+        Some(mtime)
+    } else {
+        None
+    };
+    let (tx, rx) = mpsc::channel(CHUNKS_IN_FLIGHT);
+    let job = {
+        let (writer, id, name) = (writer.clone(), provider.id.clone(), provider.name.clone());
+        let (path, label) = (path.map(Path::to_owned), label.clone());
+        tokio::task::spawn_blocking(move || {
+            let mut conn = writer.lock().unwrap_or_else(|e| e.into_inner());
+            match path {
+                Some(path) => {
+                    let file =
+                        std::fs::File::open(&path).map_err(|e| format!("{name}: {label}: {e}"))?;
+                    write_playlist(&mut conn, (&id, &name), file, mtime, unix_now())
+                }
+                None => write_playlist(
+                    &mut conn,
+                    (&id, &name),
+                    ChunkReader::new(rx),
+                    None,
+                    unix_now(),
+                ),
+            }
+        })
+    };
+    let fetched = match mtime {
+        Some(_) => Ok(0),
+        None => client.playlist(tx).await,
+    };
+    let stored = job.await.map_err(|e| format!("import task failed: {e}"))?;
+    fetched?;
+    let (n, skipped) = stored?;
+    log::info!(
+        "{label}: {n} channels imported, {skipped} entries skipped, {} ms from the request",
+        t.elapsed().as_millis()
+    );
+    Ok(Some((n, skipped)))
+}
+
+/// Whether an M3U provider's playlist path changed since it was last
+/// read: `None` for a URL, which goes by age. A file that cannot be read
+/// counts as changed, so the import says why.
+pub fn playlist_changed(writer: &Writer, provider: &Provider) -> Option<bool> {
+    let path = provider.playlist_path()?;
+    let conn = writer.lock().unwrap_or_else(|e| e.into_inner());
+    let stored = store::playlist_mtime(&conn, &provider.id).ok().flatten();
+    Some(file_mtime(path).ok().is_none_or(|m| stored != Some(m)))
+}
+
+/// A file's modification time in ns.
+fn file_mtime(path: &Path) -> io::Result<i64> {
+    let modified = std::fs::metadata(path)?.modified()?;
+    Ok(modified
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as i64))
 }
 
 /// Imports the provider's movies and their categories (VOD ticket 02).
@@ -507,6 +590,8 @@ pub fn write_channels(
             icon_url: s.stream_icon.as_deref(),
             extension,
             archive_days: s.archive_days(),
+            url: None,
+            tvg_name: None,
         };
         store::insert_channel(&tx, provider_id, &row).map(|()| true)
     })
@@ -514,6 +599,98 @@ pub fn write_channels(
     store::finish_channel_import(&tx, provider_id, now).map_err(db)?;
     tx.commit().map_err(db)?;
     Ok(count)
+}
+
+/// Replaces a provider's categories and channels with `body`, an M3U
+/// playlist (M3U ticket 02), in one transaction: each entry a live
+/// channel, its group its category ("Uncategorised" for none), its number
+/// `tvg-chno` else its place in the file. `mtime` is stored for a path.
+/// A body that is not a channel list, or has no entries, keeps the old
+/// channels. Returns the channels imported and the entries skipped.
+pub fn write_playlist(
+    conn: &mut Connection,
+    (provider_id, provider_name): (&str, &str),
+    body: impl Read,
+    mtime: Option<i64>,
+    now: i64,
+) -> Result<(usize, usize), String> {
+    let db = |e: rusqlite::Error| format!("saving channels: {e}");
+    let tx = conn.transaction().map_err(db)?;
+    store::begin_playlist_import(&tx, provider_id, provider_name).map_err(db)?;
+    let mut ord = 0;
+    let skipped = m3u::read(body, |e: m3u::Entry| {
+        // The URL without a Kodi-style `|` suffix of headers.
+        let url = e.url.split('|').next().unwrap_or(&e.url);
+        let key = e
+            .tvg_id
+            .as_deref()
+            .or(e.tvg_name.as_deref())
+            .unwrap_or(&e.title);
+        let name = [Some(e.title.as_str()), e.tvg_name.as_deref()]
+            .into_iter()
+            .flatten()
+            .find(|n| !n.is_empty())
+            .unwrap_or_else(|| m3u::last_segment(url));
+        let row = NewChannel {
+            stream_id: 0,
+            num: Some(e.chno.unwrap_or(ord + 1)),
+            name,
+            category_id: Some(e.group.as_deref().unwrap_or(UNCATEGORISED)),
+            epg_channel_id: e.tvg_id.as_deref(),
+            icon_url: e.logo.as_deref(),
+            extension: "",
+            archive_days: 0,
+            url: Some(&e.url),
+            tvg_name: e.tvg_name.as_deref(),
+        };
+        let hashes = (
+            stable_hash(&[key.as_bytes()]),
+            stable_hash(&[url.as_bytes()]),
+        );
+        store::insert_playlist_channel(&tx, provider_id, ord, hashes, &row)?;
+        ord += 1;
+        Ok(())
+    })
+    .map_err(|e| match e {
+        m3u::ReadError::Each(e) => db(e),
+        m3u::ReadError::Body(e) => e,
+    })?;
+    if ord == 0 {
+        return Err("the playlist has no channels; keeping the stored ones".into());
+    }
+    let lost = store::finish_playlist_ids(&tx, provider_id, playlist_id).map_err(db)?;
+    store::finish_channel_import(&tx, provider_id, now).map_err(db)?;
+    store::set_playlist_mtime(&tx, provider_id, mtime).map_err(db)?;
+    tx.commit().map_err(db)?;
+    Ok((ord as usize - lost, skipped))
+}
+
+/// The category of a playlist entry with no group.
+const UNCATEGORISED: &str = "Uncategorised";
+
+/// An M3U channel's `stream_id` (SPEC 6.4) from the hashes of its key
+/// (`tvg-id`, else `tvg-name`, else the title) and URL: the key's alone
+/// for the first entry with that key, so a channel keeps its id when a
+/// backup is added after it; for a later one, with the URL's and `occ`,
+/// its place among the entries that share both, from 0.
+fn playlist_id(key: i64, url: i64, first: bool, occ: i64) -> i64 {
+    let id = if first {
+        key
+    } else {
+        stable_hash(&[&key.to_le_bytes(), &url.to_le_bytes(), &occ.to_le_bytes()])
+    };
+    id & i64::MAX
+}
+
+/// 64-bit FNV-1a over `parts`, each ended by a 0xff byte (never in UTF-8):
+/// the same in every build, unlike std's hasher, as ids are stored.
+fn stable_hash(parts: &[&[u8]]) -> i64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in parts.iter().flat_map(|p| p.iter().chain(&[0xff])) {
+        h ^= u64::from(*byte);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h as i64
 }
 
 /// Replaces a provider's movie categories and movies with `body`, a
@@ -2010,5 +2187,389 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    fn import_playlist(conn: &mut Connection, body: &str) -> Result<(usize, usize), String> {
+        write_playlist(conn, ("p", "Provider"), body.as_bytes(), None, NOW)
+    }
+
+    /// `(stream_id, name, category, url)` in number order.
+    fn playlist_rows(conn: &Connection) -> Vec<(i64, String, String, String)> {
+        conn.prepare("SELECT stream_id, name, category_id, url FROM channel WHERE provider_id = 'p' ORDER BY num")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// Each tolerated form, as SPEC 6.4 lists them.
+    const PLAYLIST: &str = concat!(
+        "\u{feff}#EXTM3U url-tvg=\"http://g.example/guide.xml\"\r\n",
+        "#EXTINF:-1 tvg-id=\"harbour.uk\" tvg-name=\"Harbour One\" tvg-logo=\"http://l/1.png\" group-title=\"News;UK\",Harbour One, London\r\n",
+        "\r\n",
+        "# a comment\r\n",
+        "#EXTVLCOPT:http-user-agent=Example/1.0\r\n",
+        "http://s.example/1.ts?token=a\r\n",
+        "#EXTINF:0 tvg-id=kestrel.uk group-title='Drama' tvg-chno=\"12\",Kestrel\n",
+        "http://s.example/2.ts|User-Agent=Example\n",
+        "#EXT-X-CREDENTIALS:none\n",
+        "http://s.example/live/juniper.m3u8?token=t\n",
+        "#EXTINF:-1,Lost\n",
+        "#EXTINF:-1 tvg-name=\"Cobalt\",\n",
+        "rtmp://s.example/cobalt\n",
+    );
+
+    #[test]
+    fn playlist_imports_all_fields() {
+        let (_dir, mut conn) = db();
+        assert_eq!(import_playlist(&mut conn, PLAYLIST), Ok((4, 1)));
+        type Row = (
+            Option<i64>,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+        );
+        let row: Row = conn
+            .query_row(
+                "SELECT num, name, category_id, epg_channel_id, icon_url, tvg_name, url FROM channel WHERE name_norm LIKE 'harbour%'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                Some(1),
+                "Harbour One, London".into(),
+                "News".into(),
+                Some("harbour.uk".into()),
+                Some("http://l/1.png".into()),
+                Some("Harbour One".into()),
+                "http://s.example/1.ts?token=a".into()
+            )
+        );
+        let rows = playlist_rows(&conn);
+        let named: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|(_, n, c, _)| (n.as_str(), c.as_str()))
+            .collect();
+        // File order, `tvg-chno` 12 last; a URL with no `#EXTINF` named
+        // after its file, an empty title after its `tvg-name`.
+        assert_eq!(
+            named,
+            [
+                ("Harbour One, London", "News"),
+                ("juniper.m3u8", "Uncategorised"),
+                ("Cobalt", "Uncategorised"),
+                ("Kestrel", "Drama")
+            ]
+        );
+        assert_eq!(rows[3].3, "http://s.example/2.ts|User-Agent=Example");
+        let cats: Vec<(String, i64)> = conn
+            .prepare("SELECT name, sort FROM category WHERE provider_id = 'p' ORDER BY sort")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            cats,
+            [
+                ("News".into(), 0),
+                ("Drama".into(), 1),
+                ("Uncategorised".into(), 2)
+            ]
+        );
+        assert_eq!(last_refresh(&conn), Some(NOW));
+        // No playlist URL, header feed or token outside the stream URLs.
+        let dump: String = conn
+            .query_row(
+                "SELECT group_concat(coalesce(name, '') || coalesce(last_channels_refresh, '')) FROM provider",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!dump.contains("g.example"), "{dump}");
+    }
+
+    #[test]
+    fn each_playlist_reject_keeps_the_old_channels() {
+        let (_dir, mut conn) = db();
+        import_playlist(&mut conn, PLAYLIST).unwrap();
+        let before = playlist_rows(&conn);
+        for (body, why) in [
+            ("<html>sign in</html>\n", "#EXTM3U"),
+            ("", "#EXTM3U"),
+            ("#EXTM3U\n", "no channels"),
+            ("#EXTM3U\n#EXTINF:-1,One\n", "no channels"),
+            (
+                "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n",
+                "a stream",
+            ),
+            (
+                "#EXTM3U\n#EXTINF:-1,One\nhttp://s/1\n#EXT-X-STREAM-INF:BANDWIDTH=1\nlow.m3u8\n",
+                "a stream",
+            ),
+        ] {
+            let err = import_playlist(&mut conn, body).unwrap_err();
+            assert!(err.contains(why), "{body:?}: {err}");
+            assert_eq!(playlist_rows(&conn), before);
+            assert_eq!(last_refresh(&conn), Some(NOW));
+        }
+        // A download cut short.
+        let (tx, rx) = mpsc::channel(4);
+        tx.blocking_send(Ok(Bytes::from_static(
+            b"#EXTM3U\n#EXTINF:-1,One\nhttp://s/1\n",
+        )))
+        .unwrap();
+        tx.blocking_send(Err("Fake: download cut short, 30 of 900 bytes".into()))
+            .unwrap();
+        drop(tx);
+        let err = write_playlist(
+            &mut conn,
+            ("p", "Provider"),
+            ChunkReader::new(rx),
+            None,
+            NOW,
+        )
+        .unwrap_err();
+        assert!(err.contains("cut short"), "{err}");
+        assert_eq!(playlist_rows(&conn), before);
+    }
+
+    #[test]
+    fn playlist_ids_are_stable() {
+        let (_dir, mut conn) = db();
+        let list = |entries: &[(&str, &str, &str)]| {
+            let mut s = String::from("#EXTM3U\n");
+            for (attrs, title, url) in entries {
+                s += &format!("#EXTINF:-1 {attrs},{title}\n{url}\n");
+            }
+            s
+        };
+        let ids = |conn: &Connection| -> Vec<(String, String, i64)> {
+            let mut v: Vec<_> = playlist_rows(conn)
+                .into_iter()
+                .map(|(id, name, cat, _)| (name, cat, id))
+                .collect();
+            v.sort();
+            v
+        };
+        let entries = [
+            (
+                "tvg-id=\"harbour.uk\" group-title=\"News\"",
+                "Harbour One",
+                "http://s/h?token=a",
+            ),
+            // One stream in two groups: the same key and URL.
+            (
+                "tvg-id=\"kestrel.uk\" group-title=\"Drama\"",
+                "Kestrel",
+                "http://s/k?token=a",
+            ),
+            (
+                "tvg-id=\"kestrel.uk\" group-title=\"Films\"",
+                "Kestrel",
+                "http://s/k?token=a",
+            ),
+            // Two streams under one key.
+            (
+                "tvg-id=\"juniper.uk\" group-title=\"News\"",
+                "Juniper",
+                "http://s/j1",
+            ),
+            (
+                "tvg-id=\"juniper.uk\" group-title=\"News\"",
+                "Juniper HD",
+                "http://s/j2",
+            ),
+            ("tvg-name=\"Cobalt\"", "Cobalt Films", "http://s/c"),
+        ];
+        import_playlist(&mut conn, &list(&entries)).unwrap();
+        let first = ids(&conn);
+        assert_eq!(first.len(), 6);
+        let mut distinct: Vec<i64> = first.iter().map(|r| r.2).collect();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 6, "{first:?}");
+        assert!(distinct.iter().all(|&id| id >= 0));
+
+        // Again, as it was.
+        import_playlist(&mut conn, &list(&entries)).unwrap();
+        assert_eq!(ids(&conn), first);
+
+        // Reordered, with a channel added before them; entries that share
+        // a key keep their order among themselves.
+        let mut moved = entries.to_vec();
+        moved.rotate_left(1);
+        moved.insert(0, ("tvg-id=\"solstice.uk\"", "Solstice", "http://s/s"));
+        import_playlist(&mut conn, &list(&moved)).unwrap();
+        let after: Vec<_> = ids(&conn)
+            .into_iter()
+            .filter(|(name, ..)| name != "Solstice")
+            .collect();
+        assert_eq!(after, first);
+
+        // A backup added after a channel leaves the channel's id alone.
+        let mut backed = entries.to_vec();
+        backed.insert(
+            1,
+            (
+                "tvg-id=\"harbour.uk\" group-title=\"News\"",
+                "Harbour One",
+                "http://s/h2",
+            ),
+        );
+        import_playlist(&mut conn, &list(&backed)).unwrap();
+        let harbour = |v: &[(String, String, i64)]| -> Vec<i64> {
+            v.iter()
+                .filter(|r| r.0 == "Harbour One")
+                .map(|r| r.2)
+                .collect()
+        };
+        let now = ids(&conn);
+        assert_eq!(now.len(), 7);
+        assert!(harbour(&now).contains(&harbour(&first)[0]), "{now:?}");
+
+        // A rotated token keeps a channel whose key is its own.
+        let rotated: Vec<_> = entries
+            .iter()
+            .map(|&(a, t, u)| {
+                (
+                    a,
+                    t,
+                    if t == "Harbour One" {
+                        "http://s/h?token=b"
+                    } else {
+                        u
+                    },
+                )
+            })
+            .collect();
+        import_playlist(&mut conn, &list(&rotated)).unwrap();
+        assert_eq!(ids(&conn), first);
+    }
+
+    #[test]
+    fn favourites_survive_a_playlist_refresh() {
+        let (_dir, mut conn) = db();
+        let body = |token: &str| {
+            format!(
+                "#EXTM3U\n#EXTINF:-1 tvg-id=\"harbour.uk\",Harbour One\nhttp://s/h\n\
+                 #EXTINF:-1 tvg-id=\"juniper.uk\",Juniper\nhttp://s/j1?token={token}\n\
+                 #EXTINF:-1 tvg-id=\"juniper.uk\",Juniper Plus\nhttp://s/j2?token={token}\n"
+            )
+        };
+        import_playlist(&mut conn, &body("a")).unwrap();
+        let rows = playlist_rows(&conn);
+        for (id, ..) in &rows {
+            assert!(store::toggle_favourite(&conn, "p", store::Kind::Live, *id).unwrap());
+        }
+        // A plain refresh keeps them all.
+        import_playlist(&mut conn, &body("a")).unwrap();
+        assert!(favourites(&conn).iter().all(|&(_, available)| available));
+        // A rotated token gives the later duplicate a new id; it follows by
+        // name.
+        import_playlist(&mut conn, &body("b")).unwrap();
+        let now: Vec<i64> = playlist_rows(&conn).iter().map(|r| r.0).collect();
+        assert_ne!(now, rows.iter().map(|r| r.0).collect::<Vec<_>>());
+        let favs = favourites(&conn);
+        assert_eq!(favs.len(), 3);
+        assert!(
+            favs.iter()
+                .all(|&(id, available)| available && now.contains(&id)),
+            "{favs:?}"
+        );
+    }
+
+    /// An M3U playlist made on the fly, as [`Fixture`] is: double-quoted
+    /// attributes, a group in 40, a duplicate `tvg-id` on every tenth.
+    struct Playlist {
+        next: usize,
+        total: usize,
+        buf: Vec<u8>,
+        pos: usize,
+    }
+
+    impl Playlist {
+        fn new(total: usize) -> Self {
+            Self {
+                next: 0,
+                total,
+                buf: b"#EXTM3U\n".to_vec(),
+                pos: 0,
+            }
+        }
+    }
+
+    impl Read for Playlist {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            if self.pos == self.buf.len() {
+                self.buf.clear();
+                self.pos = 0;
+                let i = self.next;
+                if i == self.total {
+                    return Ok(0);
+                }
+                self.next += 1;
+                let id = if i % 10 == 9 { i - 1 } else { i };
+                self.buf.extend_from_slice(
+                    format!(
+                        "#EXTINF:-1 tvg-id=\"ch{id}.uk\" tvg-name=\"Channel {i}\" tvg-logo=\"http://img/{i}.png\" group-title=\"Group {}\",UK: Channel {i} ᴴᴰ\nhttp://s.example/live/{i}.ts?token=abcdef\n",
+                        i % 40
+                    )
+                    .as_bytes(),
+                );
+            }
+            let n = out.len().min(self.buf.len() - self.pos);
+            out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+
+    /// Peak heap during an M3U import must not grow with the list (7.1).
+    #[test]
+    fn m3u_import_peak_memory_does_not_scale_with_list_size() {
+        let (_dir, mut conn) = db();
+        let mut import =
+            |n| write_playlist(&mut conn, ("p", "Provider"), Playlist::new(n), None, NOW);
+        import(10).unwrap();
+        let (n, small) = peak_during(|| import(5_000).unwrap());
+        assert_eq!(n, (5_000, 0));
+        let (n, large) = peak_during(|| import(50_000).unwrap());
+        assert_eq!(n, (50_000, 0));
+        eprintln!("peak heap during import: 5k entries {small} B, 50k entries {large} B");
+        assert!(large < small + 64 * 1024, "5k: {small} B, 50k: {large} B");
+    }
+
+    /// 50k entries from the body to the commit, for `docs/perf/v1.md`:
+    /// `cargo test --release m3u_import_time -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn m3u_import_time() {
+        let (_dir, mut conn) = db();
+        write_playlist(
+            &mut conn,
+            ("p", "Provider"),
+            Playlist::new(50_000),
+            None,
+            NOW,
+        )
+        .unwrap();
+        let t = std::time::Instant::now();
+        let n = write_playlist(
+            &mut conn,
+            ("p", "Provider"),
+            Playlist::new(50_000),
+            None,
+            NOW,
+        )
+        .unwrap();
+        eprintln!("{n:?} in {} ms", t.elapsed().as_millis());
     }
 }

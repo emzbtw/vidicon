@@ -6,6 +6,7 @@
 use crate::epg_sources::epg_norm;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 use unicode_normalization::UnicodeNormalization;
@@ -401,6 +402,13 @@ const MIGRATIONS: &[&str] = &[
     // (stream recovery ticket 03). [`migrate`] fills it for the rows there.
     "ALTER TABLE channel ADD COLUMN name_loose TEXT NOT NULL DEFAULT '';
      CREATE INDEX channel_by_loose ON channel (provider_id, name_loose, num);",
+    // 29: M3U providers (M3U ticket 02). `channel.url` is an M3U channel's
+    // stream URL, NULL for Xtream; `tvg_name` its `tvg-name`, for guide
+    // matching; `provider.playlist_mtime` a playlist path's modification
+    // time in ns when last read.
+    "ALTER TABLE channel ADD COLUMN url TEXT;
+     ALTER TABLE channel ADD COLUMN tvg_name TEXT;
+     ALTER TABLE provider ADD COLUMN playlist_mtime INTEGER;",
 ];
 
 /// Whether a category or title is live, a movie or a series (VOD ticket 02).
@@ -544,6 +552,9 @@ pub struct NewChannel<'a> {
     pub icon_url: Option<&'a str>,
     pub extension: &'a str,
     pub archive_days: i64,
+    /// An M3U channel's stream URL (M3U ticket 02).
+    pub url: Option<&'a str>,
+    pub tvg_name: Option<&'a str>,
 }
 
 /// Opens (creating if needed) and migrates the database. Call once for the
@@ -556,6 +567,12 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     let mut conn = Connection::open(path)?;
     conn.busy_timeout(Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
+    // Owner only, as the credentials file: an M3U channel's stored URL can
+    // carry the account (M3U ticket 02). SQLite gives its -wal and -shm
+    // files the same mode.
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        log::warn!("database permissions: {e}");
+    }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     migrate(&mut conn)?;
     Ok(conn)
@@ -2829,8 +2846,9 @@ pub fn finish_vod_import(
 pub fn insert_channel(tx: &Connection, provider_id: &str, c: &NewChannel) -> rusqlite::Result<()> {
     tx.prepare_cached(
         "INSERT OR REPLACE INTO channel (provider_id, stream_id, num, name, name_norm,
-             category_id, epg_channel_id, icon_url, extension, archive_days, name_loose)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             category_id, epg_channel_id, icon_url, extension, archive_days, name_loose,
+             url, tvg_name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
     )?
     .execute(params![
         provider_id,
@@ -2844,7 +2862,121 @@ pub fn insert_channel(tx: &Connection, provider_id: &str, c: &NewChannel) -> rus
         c.extension,
         c.archive_days,
         loose_name(c.name),
+        c.url,
+        c.tvg_name,
     ])?;
+    Ok(())
+}
+
+/// First half of an M3U import (M3U ticket 02), inside the caller's
+/// transaction: as [`begin_channel_import`] with no categories, which
+/// [`insert_playlist_channel`] adds as their groups come, and a temporary
+/// table of the entries' identities for [`finish_playlist_ids`].
+pub fn begin_playlist_import(
+    tx: &Connection,
+    provider_id: &str,
+    provider_name: &str,
+) -> rusqlite::Result<()> {
+    begin_channel_import(tx, provider_id, provider_name, [])?;
+    tx.execute_batch(
+        "DROP TABLE IF EXISTS temp.playlist_key;
+         CREATE TEMP TABLE playlist_key (
+             ord INTEGER PRIMARY KEY, key INTEGER NOT NULL, url INTEGER NOT NULL);",
+    )
+}
+
+/// Inserts the playlist's entry `ord` (from 0, in file order) under the
+/// id `-(ord + 1)` until [`finish_playlist_ids`] gives it its own, with
+/// `key` and `url` the hashes of its identity and its URL. Its category,
+/// named as its id, is added after the others when new.
+pub fn insert_playlist_channel(
+    tx: &Connection,
+    provider_id: &str,
+    ord: i64,
+    (key, url): (i64, i64),
+    c: &NewChannel,
+) -> rusqlite::Result<()> {
+    if let Some(category) = c.category_id {
+        let known = tx
+            .prepare_cached(
+                "SELECT 1 FROM category WHERE provider_id = ?1 AND kind = ?2 AND category_id = ?3",
+            )?
+            .exists(params![provider_id, Kind::Live, category])?;
+        if !known {
+            tx.prepare_cached(
+                "INSERT INTO category (provider_id, kind, category_id, name, sort)
+                 SELECT ?1, ?2, ?3, ?3, count(*) FROM category
+                 WHERE provider_id = ?1 AND kind = ?2",
+            )?
+            .execute(params![provider_id, Kind::Live, category])?;
+        }
+    }
+    insert_channel(
+        tx,
+        provider_id,
+        &NewChannel {
+            stream_id: -(ord + 1),
+            ..*c
+        },
+    )?;
+    tx.prepare_cached("INSERT INTO temp.playlist_key (ord, key, url) VALUES (?1, ?2, ?3)")?
+        .execute(params![ord, key, url])?;
+    Ok(())
+}
+
+/// Gives each of the playlist's entries its id (SPEC 6.4): `id(key, url,
+/// first, occ)`, `first` whether no entry before it has its key and `occ`
+/// its place, from 0, among those sharing its URL too. Read in order from SQLite, so the
+/// list is never in memory. An id taken already (a hash collision) drops
+/// the entry; returns how many were dropped.
+pub fn finish_playlist_ids(
+    tx: &Connection,
+    provider_id: &str,
+    id: impl Fn(i64, i64, bool, i64) -> i64,
+) -> rusqlite::Result<usize> {
+    {
+        let mut entries = tx.prepare(
+            "SELECT ord, key, url, row_number() OVER (PARTITION BY key ORDER BY ord) = 1,
+                 row_number() OVER (PARTITION BY key, url ORDER BY ord) - 1
+             FROM temp.playlist_key",
+        )?;
+        let mut set = tx.prepare(
+            "UPDATE OR IGNORE channel SET stream_id = ?3 WHERE provider_id = ?1 AND stream_id = ?2",
+        )?;
+        let mut rows = entries.query([])?;
+        while let Some(r) = rows.next()? {
+            let ord: i64 = r.get(0)?;
+            let new = id(r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?);
+            set.execute(params![provider_id, -(ord + 1), new])?;
+        }
+    }
+    let lost = tx.execute(
+        "DELETE FROM channel WHERE provider_id = ?1 AND stream_id < 0",
+        [provider_id],
+    )?;
+    tx.execute_batch("DROP TABLE temp.playlist_key")?;
+    Ok(lost)
+}
+
+/// A playlist path's modification time in ns when last read, if it was.
+pub fn playlist_mtime(conn: &Connection, provider_id: &str) -> rusqlite::Result<Option<i64>> {
+    Ok(conn
+        .prepare_cached("SELECT playlist_mtime FROM provider WHERE id = ?1")?
+        .query_row([provider_id], |r| r.get(0))
+        .optional()?
+        .flatten())
+}
+
+/// Stores the playlist path's modification time read by this import.
+pub fn set_playlist_mtime(
+    tx: &Connection,
+    provider_id: &str,
+    mtime: Option<i64>,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "UPDATE provider SET playlist_mtime = ?2 WHERE id = ?1",
+        params![provider_id, mtime],
+    )?;
     Ok(())
 }
 
@@ -4685,6 +4817,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_database_is_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v.db");
+        std::fs::write(&path, "").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _conn = open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
     fn last_provider_is_remembered() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("v.db");
@@ -4913,6 +5056,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days: 0,
+                url: None,
+                tvg_name: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }
@@ -5076,6 +5221,9 @@ mod tests {
             conn.execute_batch(
                 "DROP INDEX channel_by_loose;
                  ALTER TABLE channel DROP COLUMN name_loose;
+                 ALTER TABLE channel DROP COLUMN url;
+                 ALTER TABLE channel DROP COLUMN tvg_name;
+                 ALTER TABLE provider DROP COLUMN playlist_mtime;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -5117,6 +5265,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days: 0,
+                url: None,
+                tvg_name: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }
@@ -6237,6 +6387,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days: 0,
+                url: None,
+                tvg_name: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }

@@ -620,6 +620,8 @@ mod tests {
             username: "u".into(),
             password: "pw".into(),
             epg,
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         }
     }
 
@@ -658,6 +660,8 @@ mod tests {
                 icon_url: None,
                 extension: "ts",
                 archive_days,
+                url: None,
+                tvg_name: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }

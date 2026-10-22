@@ -963,24 +963,67 @@ impl Client {
         tx: mpsc::Sender<Chunk>,
         track: bool,
     ) -> Result<usize, (Option<StatusCode>, String)> {
+        let shown = redact(url.as_str());
+        self.get_as(url, shown, None, tx, track, false).await
+    }
+
+    /// Streams an M3U provider's playlist into `tx` (M3U ticket 02), with
+    /// its `user_agent`, under the same limits. The URL can hold a token,
+    /// so logs name it by its host only. Returns the byte count.
+    pub async fn playlist(&self, tx: mpsc::Sender<Chunk>) -> Result<usize, String> {
+        let provider = self.provider();
+        let url = Url::parse(&provider.url)
+            .map_err(|_| format!("{}: invalid playlist url", provider.name))?;
+        self.get_as(
+            url,
+            provider.playlist_label(),
+            provider.user_agent.as_deref(),
+            tx,
+            true,
+            true,
+        )
+        .await
+        .map_err(|(_, e)| e)
+    }
+
+    /// [`Client::get_status`], logging the URL as `shown` and sending
+    /// `user_agent` in place of the client's own when given. With
+    /// `whole`, a body shorter than its `Content-Length` fails (a
+    /// playlist's, SPEC 7.1).
+    async fn get_as(
+        &self,
+        url: Url,
+        shown: String,
+        user_agent: Option<&str>,
+        tx: mpsc::Sender<Chunk>,
+        track: bool,
+        whole: bool,
+    ) -> Result<usize, (Option<StatusCode>, String)> {
         self.api_waiting.fetch_add(1, Ordering::SeqCst);
         let mut gate = self.gate.lock().await;
         if self.api_waiting.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.api_idle.notify_waiters();
         }
         tokio::time::sleep_until(gate.next_at.into()).await;
-        let shown = redact(url.as_str());
         let t = Instant::now();
         log::debug!("GET {shown}");
+        // Not known for a body reqwest unpacks.
+        let mut length = None;
+        let mut hung_up = false;
         let result = async {
-            let mut resp = self.http.get(url).send().await?;
+            let mut req = self.http.get(url);
+            if let Some(agent) = user_agent {
+                req = req.header(reqwest::header::USER_AGENT, agent);
+            }
+            let mut resp = req.send().await?;
             let status = resp.status();
             let mut n = 0;
             if status.is_success() {
+                length = resp.content_length();
                 if track {
                     self.stream_read.store(0, Ordering::Relaxed);
-                    let len = resp.content_length().unwrap_or(0);
-                    self.stream_len.store(len, Ordering::Relaxed);
+                    self.stream_len
+                        .store(length.unwrap_or(0), Ordering::Relaxed);
                 }
                 while let Some(chunk) = resp.chunk().await? {
                     n += chunk.len();
@@ -991,6 +1034,7 @@ impl Client {
                             .fetch_add(chunk.len() as u64, Ordering::Relaxed);
                     }
                     if tx.send(Ok(chunk)).await.is_err() {
+                        hung_up = true;
                         break;
                     }
                 }
@@ -1026,6 +1070,13 @@ impl Client {
         if !status.is_success() {
             let msg = format!("{}: provider returned HTTP {status}", self.provider().name);
             return fail(Some(status), msg).await;
+        }
+        if let Some(len) = length.filter(|&len| whole && !hung_up && (n as u64) < len) {
+            let msg = format!(
+                "{}: download cut short, {n} of {len} bytes",
+                self.provider().name
+            );
+            return fail(None, msg).await;
         }
         log::info!("{shown}: {n} bytes in {} ms", t.elapsed().as_millis());
         Ok(n)
@@ -1297,6 +1348,8 @@ mod tests {
             username: "al ice".into(),
             password: "p/w?".into(),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         });
         let url = c.stream_url(42, "ts").unwrap();
         assert_eq!(redact(url.as_str()), "http://h:8080/live/***/***/42.ts");
@@ -1328,6 +1381,8 @@ mod tests {
             username: "alice-7f3k".into(),
             password: "hunter2-9q".into(),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         };
         let check = |handler: fn(&str) -> (u16, String)| async move {
             let fake = FakeXtream::start(handler).await;

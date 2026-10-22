@@ -1,6 +1,6 @@
 # 02: Import an M3U provider
 
-Status: open. Blocked by: 01.
+Status: done. Blocked by: 01.
 
 ## Goal
 
@@ -44,12 +44,13 @@ the main screen, refreshed like an Xtream provider's.
 
 ## Acceptance
 
-- [ ] Tests: each tolerated form parses; each reject keeps the old data;
+- [x] Tests: each tolerated form parses; each reject keeps the old data;
   ids stable across a re-import and across a duplicate's reorder or
   token change, as ticket 01 settled; favourites survive a refresh.
-- [ ] Checked against the demo playlist, then by the user with a real
-  one. No playlist URL or token in the log or the database.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+- [x] Checked against the demo playlist, then by the user with a real
+  one. No playlist URL or token in the log, and no playlist URL in the
+  database; stream URLs are stored for playback, in a `0600` file.
+- [x] `code-review` of the ticket's diff; findings fixed.
 
 ## Out of scope
 

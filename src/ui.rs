@@ -2406,6 +2406,14 @@ fn stage_items(stages: &Stages, provider: &str, now: i64) -> Vec<StageItem> {
                     StageTone::Done,
                     String::new(),
                 ),
+                StageState::DoneSkipping { rows, skipped } => (
+                    format!("✓ {}", count_short(*rows)),
+                    StageTone::Done,
+                    match skipped {
+                        1 => "1 entry skipped".into(),
+                        n => format!("{n} entries skipped"),
+                    },
+                ),
                 StageState::Unchanged => ("✓ unchanged".into(), StageTone::Done, String::new()),
                 StageState::AtCap { count, max, next } => (
                     "at its cap".into(),
@@ -9523,13 +9531,13 @@ impl Screen {
             return self.show_settings();
         }
         let [name, url, username, password] = form.values.clone();
-        // The form does not edit guide sources; an edit keeps them.
-        let epg = self
+        // The form does not edit guide sources, the type or the user
+        // agent; an edit keeps them.
+        let kept = self
             .sources
             .iter()
             .find(|s| form.id.as_ref() == Some(&s.provider.id))
-            .map(|s| s.provider.epg.clone())
-            .unwrap_or_default();
+            .map(|s| &s.provider);
         let provider = Provider {
             id: form
                 .id
@@ -9539,7 +9547,9 @@ impl Screen {
             url,
             username,
             password,
-            epg,
+            epg: kept.map(|p| p.epg.clone()).unwrap_or_default(),
+            source: kept.map_or(config::Source::Xtream, |p| p.source),
+            user_agent: kept.and_then(|p| p.user_agent.clone()),
         };
         // Only the name changed: saved without a check.
         if let Some(source) = self
@@ -12983,6 +12993,8 @@ mod tests {
             username: "user".into(),
             password: "pass".into(),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         });
         let url = c.timeshift_url(7, "2026-10-01:20-00", 50, "ts").unwrap();
         let title = media_title(Some(101), "Harbour One", Some("Evening News"));

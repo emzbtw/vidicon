@@ -18,12 +18,46 @@ pub struct Credentials {
 pub struct Provider {
     pub id: String,
     pub name: String,
+    /// An Xtream provider's origin, or an M3U playlist's URL or absolute
+    /// path, which can hold a token: never logged.
     pub url: String,
+    /// Required for Xtream only, empty on an M3U provider.
+    #[serde(default)]
     pub username: String,
+    #[serde(default)]
     pub password: String,
     /// The provider's guide sources in order (EPG sources ticket 02).
     #[serde(default)]
     pub epg: Vec<EpgSource>,
+    /// `type` in the file (M3U ticket 02), Xtream when absent.
+    #[serde(default, rename = "type")]
+    pub source: Source,
+    /// An M3U provider's `User-Agent` for the playlist, `vidicon/<version>`
+    /// when absent.
+    pub user_agent: Option<String>,
+}
+
+/// Where a provider's channels and streams come from (M3U ticket 02):
+/// it decides the import and the stream URLs.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    #[default]
+    Xtream,
+    M3u,
+}
+
+impl Provider {
+    /// An M3U provider's playlist file, when its `url` is a path.
+    pub fn playlist_path(&self) -> Option<&Path> {
+        Some(Path::new(&self.url)).filter(|p| p.is_absolute())
+    }
+
+    /// What logs and messages call an M3U provider's playlist, holding no
+    /// token: the URL's host or the path's file name.
+    pub fn playlist_label(&self) -> String {
+        source_label(&self.url)
+    }
 }
 
 /// A `[[provider.epg]]` entry: an external XMLTV feed, by URL or local
@@ -562,7 +596,16 @@ Expected format (SPEC 4.1):
   name = \"My provider\"
   url = \"http://example.com:8080\"
   username = \"...\"
-  password = \"...\"";
+  password = \"...\"
+
+or an M3U playlist:
+
+  [[provider]]
+  id = \"lists\"
+  name = \"Public lists\"
+  type = \"m3u\"
+  url = \"https://lists.example.net/tv.m3u\"  # or an absolute path
+  user_agent = \"Example/1.0\"  # optional";
 
 const EPG_HINT: &str = "\
 Guide sources (SPEC 4.1), in order, after their [[provider]]:
@@ -628,6 +671,30 @@ fn check_epg(sources: &[EpgSource]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A provider's keys for its `type` (M3U ticket 02): an Xtream one needs
+/// a username and password and takes no user agent; an M3U one's `url` is
+/// an `http(s)` URL or an absolute path. Never quotes a value.
+fn check_source_type(p: &Provider) -> Result<(), String> {
+    match p.source {
+        Source::Xtream if p.username.is_empty() || p.password.is_empty() => {
+            Err("username and password are required for an Xtream provider".into())
+        }
+        Source::Xtream if p.user_agent.is_some() => {
+            Err("user_agent is for an M3U provider (type = \"m3u\") only".into())
+        }
+        Source::Xtream => Ok(()),
+        Source::M3u => {
+            let url = reqwest::Url::parse(&p.url)
+                .is_ok_and(|u| matches!(u.scheme(), "http" | "https") && u.has_host());
+            if url || Path::new(&p.url).is_absolute() {
+                Ok(())
+            } else {
+                Err("url must be an http:// or https:// address or an absolute path".into())
+            }
+        }
+    }
 }
 
 /// Why `credentials.toml` gives no provider to start with: the setup
@@ -752,6 +819,13 @@ fn parse_credentials(path: &Path, text: &str) -> Result<Credentials, String> {
                 p.id
             ));
         }
+        check_source_type(p).map_err(|why| {
+            format!(
+                "{}: provider \"{}\": {why}\n\n{FORMAT_HINT}",
+                path.display(),
+                p.id
+            )
+        })?;
         check_epg(&p.epg).map_err(|why| {
             format!(
                 "{}: provider \"{}\": {why}\n\n{EPG_HINT}",
@@ -1768,6 +1842,57 @@ mpv_path = \"/opt/mpv\"      # a newer build
     }
 
     #[test]
+    fn m3u_providers_load_and_are_checked() {
+        let (_root, file) = setup(0o700, 0o600);
+        let m3u = "[[provider]]\nid = \"lists\"\nname = \"Lists\"\ntype = \"m3u\"\nurl = \"https://lists.example.net/tv.m3u?token=tok-9x\"\nuser_agent = \"Example/1.0\"\n\n[[provider]]\nid = \"file\"\nname = \"File\"\ntype = \"m3u\"\nurl = \"/srv/tv/local.m3u\"\n";
+        fs::write(&file, provider_toml("main") + m3u).unwrap();
+        let p = load_credentials(&file).unwrap();
+        let types: Vec<Source> = p.iter().map(|p| p.source).collect();
+        assert_eq!(types, [Source::Xtream, Source::M3u, Source::M3u]);
+        assert_eq!(p[1].user_agent.as_deref(), Some("Example/1.0"));
+        assert_eq!(
+            (p[1].playlist_label(), p[2].playlist_label()),
+            ("lists.example.net".into(), "local.m3u".into())
+        );
+
+        for (bad, why) in [
+            (
+                "type = \"m3u\"\nurl = \"tv.m3u?token=tok-9x\"",
+                "absolute path",
+            ),
+            (
+                "type = \"m3u\"\nurl = \"ftp://h/tv.m3u?token=tok-9x\"",
+                "absolute path",
+            ),
+            ("type = \"stalker\"\nurl = \"http://h\"", "line"),
+        ] {
+            let text = format!("[[provider]]\nid = \"x\"\nname = \"X\"\n{bad}\n");
+            fs::write(&file, text).unwrap();
+            let Err(Setup::Invalid(err)) = load_credentials(&file) else {
+                panic!("loaded {bad}");
+            };
+            assert!(err.contains(why), "{bad}: {err}");
+            assert!(!err.contains("tok-9x"), "{err}");
+        }
+        for (bad, why) in [
+            ("username = \"u\"\n", "username and password"),
+            ("password = \"secret\"\n", "username and password"),
+            (
+                "username = \"u\"\npassword = \"secret\"\nuser_agent = \"A\"\n",
+                "user_agent",
+            ),
+        ] {
+            let text = format!("[[provider]]\nid = \"x\"\nname = \"X\"\nurl = \"http://h\"\n{bad}");
+            fs::write(&file, text).unwrap();
+            let Err(Setup::Invalid(err)) = load_credentials(&file) else {
+                panic!("loaded {bad}");
+            };
+            assert!(err.contains(why), "{bad}: {err}");
+            assert!(!err.contains("secret"), "{err}");
+        }
+    }
+
+    #[test]
     fn epg_sources_load_in_order_and_are_checked() {
         let (_root, file) = setup(0o700, 0o600);
         let sources = "[[provider.epg]]\nurl = \"https://epg.example.net/a/guide.xml.gz?token=tok-9x\"\nshift_minutes = -60\n\n[[provider.epg]]\nprovider_guide = true\nenabled = false\n\n[[provider.epg]]\npath = \"/srv/epg/local.xml\"\n\n[[provider.epg]]\nurl = \"https://sho.rt/a8f3kz\"\nname = \" World feed \"\nevery_hours = 2\nmax_per_day = 20\n";
@@ -1903,6 +2028,8 @@ mpv_path = \"/opt/mpv\"      # a newer build
             username: "u".into(),
             password: format!("secret-{id}"),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         }
     }
 

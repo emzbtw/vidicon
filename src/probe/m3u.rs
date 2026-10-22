@@ -7,6 +7,7 @@
 //! URLs, hosts, ids or names, so the output can be pasted anywhere.
 
 use crate::import::ChunkReader;
+use crate::m3u::{attributes, last_segment, strip_ci};
 use crate::xtream::http;
 use reqwest::Url;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -260,13 +261,6 @@ fn scan(body: impl Read) -> Result<Playlist, String> {
     Ok(p)
 }
 
-/// `prefix` at the start of `s`, ignoring ASCII case; the rest.
-fn strip_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-    let head = s.get(..prefix.len())?;
-    head.eq_ignore_ascii_case(prefix)
-        .then(|| &s[prefix.len()..])
-}
-
 /// A printable key: lowercased, or `other` when it could be data.
 fn label(k: &str) -> String {
     let k = k.trim().to_ascii_lowercase();
@@ -280,15 +274,6 @@ fn label(k: &str) -> String {
 /// The key of a `key=value` option line.
 fn key_of(rest: &str) -> String {
     label(rest.split('=').next().unwrap_or(""))
-}
-
-/// The last path segment of a URL or path, without the query.
-fn last_segment(url: &str) -> &str {
-    let path = url.split(['?', '#', '|']).next().unwrap_or(url);
-    path.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or(path)
 }
 
 fn header(p: &mut Playlist, rest: &str) {
@@ -314,81 +299,6 @@ fn header(p: &mut Playlist, rest: &str) {
             *p.feeds.entry(kind).or_default() += 1;
         }
     }
-}
-
-/// How an attribute value was written.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Quote {
-    Double,
-    Single,
-    None,
-}
-
-#[derive(Debug)]
-struct Attr {
-    key: String,
-    value: String,
-    quote: Quote,
-    terminated: bool,
-}
-
-/// `key=value` pairs, values double-quoted, single-quoted or unquoted, up to
-/// the first comma outside quotes; and that comma's byte offset with the
-/// count of commas outside quotes.
-fn attributes(s: &str) -> (Vec<Attr>, Option<(usize, usize)>) {
-    // The title starts after the first comma outside quotes (ticket 01: 329
-    // titles on a provider's list hold commas). Quotes open only right after
-    // `=`, so an apostrophe in a title opens nothing.
-    let (mut quote, mut first, mut commas, mut prev) = (None::<u8>, None, 0, 0u8);
-    for (i, b) in s.bytes().enumerate() {
-        match (quote, b) {
-            (Some(q), _) if b == q => quote = None,
-            (Some(_), _) => {}
-            (None, b'"' | b'\'') if prev == b'=' => quote = Some(b),
-            (None, b',') => (first, commas) = (first.or(Some(i)), commas + 1),
-            _ => {}
-        }
-        prev = b;
-    }
-    let head = first.map_or(s, |i| &s[..i]);
-    let mut attrs = Vec::new();
-    let mut rest = head;
-    loop {
-        rest = rest.trim_start();
-        if rest.is_empty() {
-            break;
-        }
-        let end = rest
-            .find(|c: char| c == '=' || c.is_whitespace())
-            .unwrap_or(rest.len());
-        let key = rest[..end].to_ascii_lowercase();
-        rest = &rest[end..];
-        let Some(after) = rest.strip_prefix('=') else {
-            continue;
-        };
-        let (value, quote, terminated, left) = match after.as_bytes().first() {
-            Some(&q @ (b'"' | b'\'')) => match after[1..].find(q as char) {
-                Some(j) => (&after[1..1 + j], q, true, &after[2 + j..]),
-                None => (&after[1..], q, false, ""),
-            },
-            _ => {
-                let j = after.find(char::is_whitespace).unwrap_or(after.len());
-                (&after[..j], 0, true, &after[j..])
-            }
-        };
-        attrs.push(Attr {
-            key,
-            value: value.to_owned(),
-            quote: match quote {
-                b'"' => Quote::Double,
-                b'\'' => Quote::Single,
-                _ => Quote::None,
-            },
-            terminated,
-        });
-        rest = left;
-    }
-    (attrs, first.map(|i| (i, commas)))
 }
 
 /// Counts an `#EXTINF` line's attributes and title.
@@ -748,24 +658,6 @@ mod tests {
         #KODIPROP:inputstream.adaptive.license_type=clearkey\r\n\
         rtmp://streams.example.net/live/summit\r\n\
         https://streams.example.net/vod/loose.mp4?token=1\r\n";
-
-    #[test]
-    fn attributes_read_every_quoting() {
-        let (a, comma) = attributes(r#" tvg-id="a,b" tvg-name='Its' group=News x,Bob's, Show"#);
-        assert_eq!(a.len(), 3);
-        assert_eq!((a[0].key.as_str(), a[0].value.as_str()), ("tvg-id", "a,b"));
-        assert_eq!(a[1].quote, Quote::Single);
-        assert_eq!((a[2].value.as_str(), a[2].quote), ("News", Quote::None));
-        // Two commas outside quotes: the title is after the first one.
-        let (i, n) = comma.unwrap();
-        assert_eq!(n, 2);
-        assert!(
-            r#" tvg-id="a,b" tvg-name='Its' group=News x,Bob's, Show"#[i..]
-                .starts_with(",Bob's, Show")
-        );
-        let (a, _) = attributes(r#" tvg-id="open"#);
-        assert!(!a[0].terminated);
-    }
 
     #[test]
     fn scan_counts_a_playlist() {

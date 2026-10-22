@@ -125,6 +125,8 @@ impl FakeXtream {
             username: "user".into(),
             password: "pass".into(),
             epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
         }
     }
 
