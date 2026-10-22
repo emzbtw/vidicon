@@ -1913,7 +1913,7 @@ configurable later.
 | `f` | Toggle favourite: the channel, movie or series selected (in a series' episodes, the series) |
 | `J` / `K` | Move favourite down / up (in Favourites only, across kinds) |
 | `r` | Refresh now, and open the refresh panel (8.2); while one runs, the panel alone, as the refresh absorbs it (7.2) |
-| `p` | Switch provider: a picker of the providers, with one provider too, its last row `Add provider…`, which opens Settings › Providers on the form (onboarding ticket 01) |
+| `p` | Switch provider: a picker of the providers, with one provider too, each with its type (`Xtream` or `M3U`) on the right (M3U ticket 06), its last row `Add provider…`, which opens Settings › Providers on the form (onboarding ticket 01) |
 | Space | Pause / resume the Player (not while searching: it types) |
 | `s` | Stop: closes the Player's window |
 | `m` | Mute / unmute |

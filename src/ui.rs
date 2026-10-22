@@ -8287,10 +8287,16 @@ impl Screen {
             .map(|s| ProviderItem {
                 name: s.provider.name.as_str().into(),
                 note: s.refresh.lines().last().unwrap_or("").into(),
+                kind: match s.provider.source {
+                    config::Source::Xtream => "Xtream",
+                    config::Source::M3u => "M3U",
+                }
+                .into(),
             })
             .chain(std::iter::once(ProviderItem {
                 name: "Add provider…".into(),
                 note: "In Settings › Providers".into(),
+                kind: "".into(),
             }))
             .collect();
         let w = self.window();
