@@ -82,7 +82,7 @@ jobs:
           cp target/release/vidicon README.md LICENSE "$tarball/"
           cp assets/vidicon.desktop assets/vidicon.svg "$tarball/"
           tar -czf "dist/$tarball.tar.gz" "$tarball"
-          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+          cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
 
       - uses: actions/upload-artifact@v7
         with:
