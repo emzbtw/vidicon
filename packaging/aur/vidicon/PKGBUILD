@@ -1,6 +1,6 @@
 # Maintainer: emz <307707176+emzbtw@users.noreply.github.com>
 pkgname=vidicon
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='A fast, keyboard-driven IPTV player for Linux'
 arch=('x86_64')
@@ -13,7 +13,7 @@ depends=('gcc-libs' 'glibc' 'fontconfig' 'inter-font' 'mpv' 'ffmpeg'
          'libx11' 'libxcursor' 'libxi')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('a19e19c5782fbc1772afa99905d4f8be2341b3af8a58c48b710b83735d9ec1fd')
+sha256sums=('119c46227e2930911fd7e714a69adb060d4d611f948a81f1aed377e08e51ed0d')
 
 prepare() {
   cd "$pkgname-$pkgver"
