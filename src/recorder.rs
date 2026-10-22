@@ -201,6 +201,9 @@ struct Running {
     /// Taken when the stop is sent.
     stop: Option<oneshot::Sender<()>>,
     cancelled: bool,
+    /// An M3U stream's URL, which can hold a token: masked in ffmpeg's
+    /// last line.
+    m3u_url: Option<String>,
 }
 
 pub struct Recorder {
@@ -756,6 +759,7 @@ impl Recorder {
             Ok(stream) => stream,
             Err(e) => return self.fail(r.id, &e, false).await,
         };
+        let m3u_url = (client.provider().source == crate::config::Source::M3u).then(|| url.clone());
         let name = recording_name(&r.channel, r.title.as_deref(), r.start);
         let file = match reserve_recording(&self.setup.dir, &name) {
             Ok(file) => file,
@@ -785,6 +789,7 @@ impl Recorder {
                 stop_at: r.padded_stop,
                 stop: Some(stop),
                 cancelled: false,
+                m3u_url,
             },
         );
         tokio::spawn(supervise(child, stopped, id, self.exits.clone()));
@@ -851,6 +856,11 @@ impl Recorder {
                 self.report(id, Event::Ended).await;
             }
             Exit::Early(line) => {
+                let line = match &r.m3u_url {
+                    Some(url) => line.replace(url.as_str(), &crate::config::source_label(url)),
+                    None => line,
+                };
+                let line = xtream::redact(&line);
                 log::warn!("recording {id} failed: {line}");
                 self.fail(id, &line, true).await;
             }
@@ -1235,6 +1245,13 @@ echo 'http://h:8080/live/user/secret/1.ts: Server returned 404 Not Found' >&2
 exit 1
 ";
 
+    /// Fails naming its input URL, as ffmpeg does.
+    const FAILS_WITH_URL: &str = r#"#!/bin/sh
+while [ "$1" != -i ]; do shift; done
+echo "$2: Server returned 403 Forbidden" >&2
+exit 1
+"#;
+
     /// A recorder with a fake ffmpeg, provider `p` and its channel 1.
     struct Fake {
         dir: tempfile::TempDir,
@@ -1270,21 +1287,14 @@ exit 1
         }
 
         /// A recorder whose provider is an M3U one, with a user agent.
-        fn m3u(before: impl FnOnce(&Connection)) -> Self {
+        fn m3u(ffmpeg: &str, before: impl FnOnce(&Connection)) -> Self {
             let provider = Provider {
                 url: "http://127.0.0.1:9/tv.m3u".into(),
                 source: crate::config::Source::M3u,
                 user_agent: Some("Example/1.0".into()),
                 ..xtream("")
             };
-            Self::start(
-                tempfile::tempdir().unwrap(),
-                RECORDS,
-                0,
-                0,
-                provider,
-                before,
-            )
+            Self::start(tempfile::tempdir().unwrap(), ffmpeg, 0, 0, provider, before)
         }
 
         fn at(
@@ -1486,7 +1496,7 @@ exit 1
     /// while one plays: the provider has no connection limit.
     #[tokio::test]
     async fn an_m3u_channel_records_with_its_headers() {
-        let mut f = Fake::m3u(|c| {
+        let mut f = Fake::m3u(RECORDS, |c| {
             c.execute(
                 "UPDATE channel SET url = 'http://s.example/1.m3u8?token=t',
                      referrer = 'https://r.example/', origin = 'https://o.example'",
@@ -1534,6 +1544,24 @@ exit 1
         // Nothing was written: the reserved file is gone, and forgotten.
         assert!(!Path::new(&file).exists());
         assert_eq!(r.file, None);
+    }
+
+    /// An M3U stream's token is not in the note: ffmpeg's line names the
+    /// stream's host only.
+    #[tokio::test]
+    async fn an_m3u_recording_failing_keeps_its_token_out_of_the_note() {
+        let mut f = Fake::m3u(FAILS_WITH_URL, |c| {
+            c.execute(
+                "UPDATE channel SET url = 'http://s.example/1.m3u8?k=tok'",
+                [],
+            )
+            .unwrap();
+        });
+        let now = unix_now();
+        f.send(Command::Schedule(programme(now - 60, now + 60)));
+        started(f.event().await);
+        let note = ended(f.event().await).note.unwrap();
+        assert_eq!(note, "s.example: Server returned 403 Forbidden");
     }
 
     #[tokio::test]
