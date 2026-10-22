@@ -947,6 +947,64 @@ check, through its limiter (6.2), refreshing only data that is stale; the
 last check shows meanwhile. Opened during a refresh, the check runs when
 the refresh ends.
 
+### 6.4 M3U playlists
+
+**Verified 2026-10-22 (M3U ticket 01)** with `vidicon --probe-m3u
+<url-or-path>` (devtools), which prints counts only and fetches a URL
+twice, 5 min apart. Two lists: a public one, and one an M3U and EPG
+generator builds from the provider's Xtream account (a smaller
+selection), as the provider's own `get.php` is refused (below). So the
+second list shows the generator's habits, not the provider's. A debug
+build.
+
+- **Size:** about 11k entries in 2.6 MB and about 19k in 6.2 MB, each
+  read in under 2.5 s. Every entry has an `#EXTINF` and a URL; no blank
+  or comment line sits inside an entry, and neither list has a BOM. The
+  public list ends every line in CRLF, the generator's in LF.
+- **Attributes:** every value is double-quoted in both. `tvg-id`,
+  `tvg-logo` and `group-title` are on nearly every entry. The public
+  list has no `tvg-name`; the generator's has one on every entry, and
+  about 400 entries have it without a `tvg-id`. The generator adds
+  attributes of its own (an id on every entry, and a few prefixed
+  ones) that the parser ignores. `tvg-chno` is on 41 of its entries,
+  none of them a number.
+- **Titles:** about 330 generator titles hold a comma. The title starts
+  after the first comma outside quotes; the last comma would cut them.
+- **Groups:** 30 and about 170. About 600 public entries have
+  `;`-separated groups.
+- **Duplicates:** none on the public list. On the generator's, about
+  1.5k `tvg-id`s are on more than one entry (5k entries), and about 900
+  URLs are too: one stream in several groups.
+- **Options:** about 590 public entries set `http-user-agent` and 240
+  `http-referrer` by `#EXTVLCOPT`, and the same entries carry both as
+  `#EXTINF` attributes too. No `#KODIPROP` and no pipe suffix in either.
+- **URLs:** public, mostly `https`, about 2.4k `http`, and under ten
+  `rtmp`, `mmsh` and `srt`; the longest about 1.2k characters.
+  Generator, `http`, about 60 characters, with no token.
+- **Header:** no attributes on the public list; one gzip `url-tvg`
+  feed on the generator's.
+- **HLS tags:** the generator's list has one `#EXT-X-CREDENTIALS` line.
+  So a playlist counts as an HLS stream only with
+  `#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`; other `#EXT-X-` lines
+  are skipped like any `#` line.
+- **Catch-up:** none on the public list. About 330 generator entries
+  (2%) have `catchup-type` and `catchup-days`, none `catchup-source`,
+  and the provider behind it has catch-up through Xtream already. M3U
+  catch-up is not worth a milestone yet.
+- **Between fetches:** nothing changed on either list: no URL, no
+  order, and no `tvg-name` under the generator's 13.7k unique
+  `tvg-id`s. Neither list showed a reorder or a rotated token, so this
+  is a judgement more than a measurement: identity is `tvg-id`, else
+  `tvg-name`, else the title; duplicates are told apart by a URL hash,
+  which survives the reorder that adding channels causes, with an
+  occurrence index only among entries that share the URL too. A
+  rotated token changes a duplicate's id; the favourites name fallback
+  covers it.
+- **`get.php` refused:** the provider's own playlist URL answers HTTP
+  884 with an empty body, from a proxy in front of the panel, for any
+  user agent, `type` and `output`, while `player_api.php` works. A
+  panel's playlist cannot be assumed (M3U ticket 06).
+
 ## 7. Import and refresh
 
 ### 7.1 Import (ADR 0003)

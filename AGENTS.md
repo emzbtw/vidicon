@@ -113,6 +113,11 @@ plain) and prints counts only: size, channels, programmes, reach,
 time offsets, matches against the first provider's stored channels by
 id and by normalised name, and how its times compare with the
 provider's guide (EPG sources ticket 01).
+`--probe-m3u <url-or-path>` streams an M3U playlist and prints counts
+only: entries, line endings, quoting, attributes, groups, duplicates,
+option lines, URL shapes and header guide feeds. A URL is fetched again
+5 min later to count which identity scheme loses fewer channels (M3U
+ticket 01). It needs no credentials.
 
 `VIDICON_FPS=1` scrolls one row per frame (after any `--keys`) and prints
 frame stats every second; `VIDICON_FPS=time` in the guide grid moves the

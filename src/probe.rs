@@ -6,9 +6,10 @@
 //! database alone, how many channels have an alternate, and
 //! `--probe-pause` what pausing a channel does (stream recovery ticket 01),
 //! `--probe-blackout` what a blackout looks like to mpv (ticket 05),
-//! and `--probe-epg` how an external guide matches (EPG sources ticket 01). Never URLs, hosts, credentials or titles, so the output can
-//! be pasted anywhere. Every request goes through the client's gate (SPEC
-//! 6.2).
+//! `--probe-epg` how an external guide matches (EPG sources ticket 01), and
+//! `--probe-m3u` what a playlist holds (M3U ticket 01). Never URLs, hosts,
+//! credentials or titles, so the output can be pasted anywhere. Every
+//! request to the provider's API goes through the client's gate (SPEC 6.2).
 
 use crate::config::{self, Provider};
 use crate::import::{ChunkReader, parse_xmltv, unix_now};
@@ -26,11 +27,13 @@ use tokio::sync::mpsc;
 
 mod blackout;
 mod epg;
+mod m3u;
 mod pause;
 mod vod;
 
 pub use blackout::run as blackout;
 pub use epg::run as epg;
+pub use m3u::run as m3u;
 pub use pause::run as pause;
 pub use vod::run as vod;
 

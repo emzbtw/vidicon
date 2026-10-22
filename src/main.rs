@@ -26,7 +26,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage: vidicon [--credentials <path>]";
 #[cfg(feature = "devtools")]
-const DEV_USAGE: &str = " [--screenshot <path>] [--keys <sequence>] [--play] [--probe-archive <stream_id>] [--probe-tables <id,...>] [--probe-vod] [--probe-alternates] [--probe-pause <stream_id>] [--probe-blackout <stream_id>] [--probe-epg <url-or-path>]";
+const DEV_USAGE: &str = " [--screenshot <path>] [--keys <sequence>] [--play] [--probe-archive <stream_id>] [--probe-tables <id,...>] [--probe-vod] [--probe-alternates] [--probe-pause <stream_id>] [--probe-blackout <stream_id>] [--probe-epg <url-or-path>] [--probe-m3u <url-or-path>]";
 #[cfg(not(feature = "devtools"))]
 const DEV_USAGE: &str = "";
 
@@ -57,8 +57,9 @@ fn run() -> Result<(), String> {
         mut pause,
         mut blackout,
         mut epg,
+        mut m3u,
     ) = (
-        None, None, false, None, None, false, false, None, None, None,
+        None, None, false, None, None, false, false, None, None, None, None,
     );
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
@@ -125,6 +126,16 @@ fn run() -> Result<(), String> {
                         .to_owned(),
                 );
             }
+            #[cfg(feature = "devtools")]
+            Some("--probe-m3u") => {
+                let source = value()?;
+                m3u = Some(
+                    source
+                        .to_str()
+                        .ok_or_else(|| format!("--probe-m3u needs a URL or path, not {source:?}"))?
+                        .to_owned(),
+                );
+            }
             Some("-h" | "--help") => {
                 println!("{USAGE}{DEV_USAGE}");
                 return Ok(());
@@ -182,6 +193,10 @@ fn run() -> Result<(), String> {
     if let Some(source) = epg {
         let provider = first()?;
         return rt.block_on(probe::epg(provider, source));
+    }
+    #[cfg(feature = "devtools")]
+    if let Some(source) = m3u {
+        return rt.block_on(probe::m3u(source));
     }
     #[cfg(feature = "devtools")]
     if alternates {

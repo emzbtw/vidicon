@@ -28,12 +28,14 @@ the main screen, refreshed like an Xtream provider's.
   "Uncategorised" for none.
 - Refresh: one GET with the provider's user agent, on the schedule and
   `r`, under the rate limits; a path re-read on mtime change.
-- Rejects (no `#EXTM3U`, short of `Content-Length`, 0 entries, `#EXT-X-`)
+- Rejects (no `#EXTM3U`, short of `Content-Length`, 0 entries,
+  `#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`)
   keep the old channels and show in the refresh panel; skipped entries
   are counted there.
 - The demo provider serves an invented playlist: duplicates, a blank
   line and a comment mid-entry, CRLF, unquoted attributes, a long URL,
-  an entry with no `#EXTINF`, one with no URL.
+  an entry with no `#EXTINF`, one with no URL, a title with a comma,
+  an `#EXT-X-CREDENTIALS` line, and one stream in two groups.
 - Performance: a 50k-entry synthetic playlist timed from request to
   commit, and an `m3u_import_peak_memory_does_not_scale_with_list_size`
   test beside the three in `src/import.rs`; numbers in

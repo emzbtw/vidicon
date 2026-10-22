@@ -1,6 +1,6 @@
 # 01: Measure a playlist
 
-Status: open. Blocked by: none.
+Status: done. Blocked by: none.
 
 ## Goal
 
@@ -34,13 +34,13 @@ SPEC 3, 5 (`name_norm`, `name_loose`). `src/probe.rs`,
 
 ## Acceptance
 
-- [ ] Run by the user against at least two real playlists; numbers
+- [x] Run by the user against at least two real playlists; numbers
   recorded.
-- [ ] The milestone's Proposed entries on ids and `tvg-name` settled or
+- [x] The milestone's Proposed entries on ids and `tvg-name` settled or
   carried into 02.
-- [ ] `catchup` counts recorded, for whether M3U catch-up is worth a
+- [x] `catchup` counts recorded, for whether M3U catch-up is worth a
   later milestone.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+- [x] `code-review` of the ticket's diff; findings fixed.
 
 ## Out of scope
 

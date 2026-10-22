@@ -20,7 +20,9 @@ SPEC 4.1, 8.2. `src/config.rs` (file writing), `src/ui.rs`,
 - Saving fetches the playlist once and reports a reject with its reason,
   as the form reports a failed Xtream login.
 - A `get.php?username=...&password=...` URL offers to add it as Xtream,
-  the fields filled from it.
+  the fields filled from it. It offers this when the playlist fetch is
+  refused too: a panel can refuse `get.php` (HTTP 884, empty body)
+  while its API works (SPEC 6.4).
 - The first-run setup screen offers both types.
 - Settings hides Xtream-only items for an M3U provider (04's
   capabilities).

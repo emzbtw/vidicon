@@ -44,16 +44,18 @@ where they broke: `research/reference-players.md` section 7.
   blank lines are skipped. A URL with no `#EXTINF` is kept, named after
   its URL path's last segment. Tolerated: a UTF-8 BOM, CRLF, attribute
   values double-quoted, single-quoted or unquoted, commas inside quoted
-  values (the title is everything after the last comma outside quotes).
+  values and in the title (the title is everything after the first
+  comma outside quotes; SPEC 6.4).
 - **Fields:** the title as `name`; `tvg-id` as `epg_channel_id`;
   `tvg-logo`, `tvg-icon` or `logo` as `icon_url`; `group-title` or
   `group` as the category, its first value when `;`-separated, else
   "Uncategorised"; `tvg-chno` or `tvg-ch` as `num`, else file order.
   `tvg-name` is kept for guide matching and identity.
 - **Identity:** `stream_id` is a stable 63-bit hash of `tvg-id`, else
-  `tvg-name`, else the title, plus an occurrence index for duplicates
-  (several streams with one `tvg-id`). The favourites name fallback
-  covers channels whose key still changes.
+  `tvg-name`, else the title, plus the URL's hash for duplicates
+  (several streams with one key), and an occurrence index among
+  duplicates that share the URL too (SPEC 6.4). The favourites name
+  fallback covers channels whose URL changes.
 - **The stream URL** is stored in a nullable `channel.url`, set for M3U
   channels only.
 - **Stream headers:** `#EXTVLCOPT:http-user-agent=`, `http-referrer=`
@@ -76,8 +78,9 @@ where they broke: `research/reference-players.md` section 7.
   mtime changes.
 - **Rejected playlists** keep the old channels and show the reason in
   the refresh panel: no `#EXTM3U` at the start, a download shorter than
-  its `Content-Length`, 0 entries, or an HLS stream playlist (`#EXT-X-`
-  lines: "this is a stream, not a channel list"). Entries without a URL
+  its `Content-Length`, 0 entries, or an HLS stream playlist
+  (`#EXT-X-TARGETDURATION` or `#EXT-X-STREAM-INF`: "this is a stream,
+  not a channel list"; other `#EXT-X-` lines are skipped, SPEC 6.4). Entries without a URL
   are skipped and counted (`12 entries skipped`); they never reject the
   playlist.
 - **Providers form:** a type choice, Xtream or M3U playlist. M3U shows
@@ -98,10 +101,11 @@ where they broke: `research/reference-players.md` section 7.
 ## Proposed (settle in the tickets)
 
 - Duplicate ids: the occurrence index breaks when entries are reordered;
-  a URL hash (ynoTV) breaks when a token rotates. Ticket 01 fetches a
-  list twice and counts which changes less. Carried into 01.
+  a URL hash (ynoTV) breaks when a token rotates. Settled in 01: a URL
+  hash, as no token rotated on either list, though neither could show
+  a reorder or a rotation in 5 min (SPEC 6.4).
 - `tvg-name` in the identity: only if it is stable between fetches.
-  Carried into 01.
+  Settled in 01: kept, none changed (SPEC 6.4).
 - xz decoder: a pure-Rust crate, so packages gain no library. Carried
   into 05.
 
