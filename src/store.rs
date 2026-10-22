@@ -796,13 +796,11 @@ pub fn alternate_spread(
             "SELECT c.stream_id, c.name_loose FROM channel c
              WHERE provider_id = ?1 AND {NOT_HIDDEN} AND {NOT_RULED}"
         ),
-        AlternatesOf::Favourites => {
-            "SELECT f.stream_id, coalesce(c.name_loose, '') AS name_loose
+        AlternatesOf::Favourites => "SELECT f.stream_id, coalesce(c.name_loose, '') AS name_loose
              FROM favourite f LEFT JOIN channel c
                  ON c.provider_id = f.provider_id AND c.stream_id = f.stream_id
              WHERE f.provider_id = ?1 AND f.kind = 'live'"
-                .into()
-        }
+            .into(),
         AlternatesOf::Recent => "SELECT h.stream_id, c.name_loose
              FROM history h JOIN channel c
                  ON c.provider_id = h.provider_id AND c.stream_id = h.stream_id
