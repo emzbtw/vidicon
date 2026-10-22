@@ -51,6 +51,10 @@ oldest supported release of each distribution plus its `latest` image.
   At end of life, move both the workflow matrix and the README up: Fedora 43
   around December 2026 (its repos move to the archive and `dnf` fails),
   Ubuntu 22.04 in April 2027, Debian 12 around 2028.
+- **Timings:** v0.1.1's run took 14 min to build, 1 to 2 min per install
+  test, but about 10 min for `ubuntu:22.04`, which is normal. Each job
+  has a `timeout-minutes` of about 3x that (45, 30, 10); raise it if a
+  job grows, rather than re-running into it.
 - **A `latest` image failing** with no code change usually means a new
   distribution release; read the job log before blaming the package.
 - **The dlopened library list** in the script mirrors the deb and rpm
