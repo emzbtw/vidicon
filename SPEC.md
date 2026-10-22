@@ -1542,6 +1542,18 @@ branch).
   every field is masked again when the dashboard closes, so it always opens
   masked. Masked values are not in the window at all, so a snapshot shows
   only what was revealed.
+- **What an M3U provider lacks** (M3U ticket 04) is hidden, not shown
+  disabled: the UI asks the provider shown what it has (`archive`, `vod`,
+  `account`, from its source; an Xtream provider has all three, an M3U
+  one none). Without `vod` the sidebar has no Continue watching and no
+  kind switch (`h`/`l` and `[`/`]` pass over where Continue watching
+  sits), and manage mode has no kind switch. Without `account` the
+  status bar shows no expiry or its colours, and neither `i` nor a click
+  on the dot opens the dashboard. Without `archive` the grid has no
+  archive marks and no dimmed past programmes, the detail strip and NOW
+  PLAYING have no `CATCH-UP` or `START OVER`, and no guide tables are
+  asked for. The keys panel drops the keys that would lead there (8.3).
+  Switching providers redraws all of it at once.
 - **Recordings view** (recording ticket 04): `v` opens a card over
   everything, up to 680 by 640 px, closed by Esc, `v`, `q`, the × button
   or a click outside; other keys do nothing while it is open. Its header
@@ -1867,6 +1879,12 @@ not, `d` downloads it and `D` the season (VOD ticket 10), and Esc goes
 back to the list. The Player's keys, `-`, `r`, `i`, `v`, `?` and `q` work as
 anywhere; any other key goes back to the list and acts there.
 
+On a provider without movies and series, catch-up or an account (8.2,
+M3U ticket 04) the keys for them do nothing, without a message: Tab and
+Shift-Tab outside the grid and in manage mode, Tab in search, `w`, `d`,
+`D`, `S` on a channel, Enter on a past programme in the grid, and `i`.
+The keys panel leaves them out, and its grid Enter reads `Play live`.
+
 In a channel's alternates (stream recovery ticket 03, 8.2) `j`/`k`,
 arrows and `g`/`G` move, Enter plays the selected one, and Esc or `o`
 closes them. The Player's keys, `-`, `r`, `i`, `v`, `?` and `q` work as
@@ -1931,7 +1949,8 @@ All of every kind and back: results are grouped by kind, live first, then
 movies, then series, each group its best 50, and the line under the bar
 counts each (`12 channels · 50 of 312 movies · 3 series`). A title row
 then says its kind (8.2, list rows). Enter keeps a widened filter as it keeps any other
-(VOD ticket 09). Search filters the view's own keys, so in All it only finds
+(VOD ticket 09). On a provider without movies and series (M3U ticket 04)
+Tab does nothing and the line under the bar does not offer it. Search filters the view's own keys, so in All it only finds
 channels of shown categories, and nowhere channels a channel rule or kept
 tags hide (5); the index keeps every name. At 50k channels an in-memory match over names takes 4 to 5 ms
 (prototype benchmark), so v1 keeps names in memory for matching (about a few

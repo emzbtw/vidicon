@@ -1,6 +1,6 @@
 # 04: Hide what an M3U provider lacks
 
-Status: open. Blocked by: 02.
+Status: done. Blocked by: 02.
 
 ## Goal
 
@@ -25,9 +25,18 @@ catch-up, or movies and series.
 
 ## Acceptance
 
-- [ ] Tests: each capability off hides its view and disables its keys.
-- [ ] Screenshots with an Xtream and an M3U demo provider, compared.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+- [x] Tests: each capability off hides its view and disables its keys.
+  Pure functions only (`lacking`, `key_panel`, `step_category`,
+  `guide_blocks`, `status_account`); the window's views have no test
+  harness, so the screenshots below check them.
+- [x] Screenshots with an Xtream and an M3U demo provider, compared:
+  main view, keys panel, search and manage mode. The M3U side has no
+  Continue watching, kind switches, `i`, `S`, Tab or movie keys. Its
+  grid has no programmes until 05, so the archive marks rest on the
+  test.
+- [x] `code-review` of the ticket's diff; findings fixed: the manage
+  hint built once instead of three copies, `Caps` named `Capabilities`.
+  Kept: `key_panel` matches its own display strings, as it did for F12.
 
 ## Out of scope
 

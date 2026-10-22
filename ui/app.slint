@@ -392,6 +392,8 @@ component StatusBar inherits Rectangle {
     in property <bool> titles;
     callback provider-clicked();
     callback account-clicked();
+    // The dot opens the dashboard only where there is an account.
+    in property <bool> has-account: true;
     // The sweep line or the refresh state: the refresh panel.
     callback refresh-clicked();
     // The gear: the Settings view.
@@ -438,6 +440,7 @@ component StatusBar inherits Rectangle {
                     TouchArea {
                         x: -14px;
                         width: 14px + 7px + 4px;
+                        enabled: has-account;
                         mouse-cursor: MouseCursor.pointer;
                         clicked => { account-clicked(); }
                     }
@@ -547,6 +550,11 @@ export component AppWindow inherits Window {
     in property <int> category;
     // The library's kind: 0 live, 1 movies, 2 series (VOD ticket 03).
     in property <int> library-kind;
+    // What the provider shown offers (M3U ticket 04): without movies and
+    // series the kind switches and Continue watching are hidden, without
+    // an account the status bar's clicks do not open the dashboard.
+    in property <bool> has-vod: true;
+    in property <bool> has-account: true;
     // `12 channels`, `1 movie`: the list's count while not filtered.
     in property <string> count-label;
     // The library lists movies or series rather than channels.
@@ -1054,7 +1062,8 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             spacing: 0px;
                             for name[i] in ["Favourites", "Recently played", "Continue watching"] : Rectangle {
-                                height: category-height;
+                                visible: i < 2 || has-vod;
+                                height: self.visible ? category-height : 0px;
                                 border-radius: 6px;
                                 background: i == category ? Palette.surface-2 : transparent;
                                 TouchArea {
@@ -1072,7 +1081,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        Rectangle {
+                        if has-vod : Rectangle {
                             height: 34px;
                             border-radius: 8px;
                             background: Palette.bg;
@@ -1386,6 +1395,7 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                                 alignment: start;
                                 for k[i] in ["Live", "Movies", "Series"] : Rectangle {
+                                    visible: has-vod;
                                     width: kind-label.preferred-width + 24px;
                                     height: 28px;
                                     y: (parent.height - self.height) / 2;
@@ -1829,9 +1839,10 @@ export component AppWindow inherits Window {
                             }
                         }
                         Text {
-                            text: manage-kind == 0
-                                ? "↑↓ move  ·  Tab kind  ·  Enter shows or hides  ·  Ctrl+Enter adds the filter as a rule  ·  Ctrl+H hides names with it  ·  Ctrl+K keeps it as a tag  ·  Esc done"
-                                : "↑↓ move  ·  Tab kind  ·  Enter shows or hides  ·  Ctrl+Enter adds the filter as a rule  ·  Esc done";
+                            text: "↑↓ move  ·  " + (has-vod ? "Tab kind  ·  " : "")
+                                + "Enter shows or hides  ·  Ctrl+Enter adds the filter as a rule  ·  "
+                                + (manage-kind == 0 ? "Ctrl+H hides names with it  ·  Ctrl+K keeps it as a tag  ·  " : "")
+                                + "Esc done";
                             font-size: 12px;
                             color: Palette.dim;
                             overflow: elide;
@@ -2446,6 +2457,7 @@ export component AppWindow inherits Window {
             status-bar := StatusBar {
                 provider: provider-name;
                 account: account-status;
+                has-account: has-account;
                 urgency: account-urgency;
                 refresh: refresh-status;
                 refresh-error: refresh-error;

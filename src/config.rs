@@ -47,6 +47,29 @@ pub enum Source {
     M3u,
 }
 
+/// What a provider offers beyond live channels (M3U ticket 04). The UI
+/// hides what it lacks rather than showing it disabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Capabilities {
+    /// Catch-up: past programmes from the archive, and the guide tables.
+    pub archive: bool,
+    /// Movies and series.
+    pub vod: bool,
+    /// The account check: the dashboard and the expiry.
+    pub account: bool,
+}
+
+impl Source {
+    pub fn caps(self) -> Capabilities {
+        let xtream = self == Source::Xtream;
+        Capabilities {
+            archive: xtream,
+            vod: xtream,
+            account: xtream,
+        }
+    }
+}
+
 impl Provider {
     /// An M3U provider's playlist file, when its `url` is a path.
     pub fn playlist_path(&self) -> Option<&Path> {

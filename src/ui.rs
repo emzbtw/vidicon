@@ -187,6 +187,19 @@ fn action(text: &str, ctrl: bool) -> Option<Action> {
     })
 }
 
+/// Whether `action` leads to what the provider lacks (M3U ticket 04): then
+/// it does nothing. `S` still restarts a movie where there are movies, and
+/// Tab in the grid steps through categories.
+fn lacking(action: Action, caps: config::Capabilities, guide_open: bool) -> bool {
+    match action {
+        Action::Account => !caps.account,
+        Action::StartOver => !caps.archive && (guide_open || !caps.vod),
+        Action::Cycle(_) => !caps.vod && !guide_open,
+        Action::Watched | Action::Download | Action::DownloadSeason => !caps.vod,
+        _ => false,
+    }
+}
+
 /// A key in search mode (SPEC 8.2). The app, not a text widget, handles
 /// typing, so letters go to the query and only keys that cannot be typed
 /// navigate.
@@ -373,33 +386,41 @@ const KEY_NOTES: [(&str, &str); 7] = [
 
 /// The keys panel's contents for this app: [`KEY_PANEL`] and [`KEY_NOTES`]
 /// less what does not apply.
-fn key_panel() -> (Vec<KeyColumn>, Vec<KeyNote>) {
-    let applies = |keys: &[&str]| match keys {
-        ["F12"] => cfg!(feature = "devtools"),
-        _ => true,
+fn key_panel(caps: config::Capabilities) -> (Vec<KeyColumn>, Vec<KeyNote>) {
+    // What the provider lacks goes, or is said without it (M3U ticket 04).
+    let row = |group: &str, keys: &[&str], what: &'static str| -> Option<&'static str> {
+        match (group, keys) {
+            (_, ["F12"]) => cfg!(feature = "devtools").then_some(what),
+            ("MOVIES AND SERIES", _) | (_, ["Tab", "⇧Tab"]) if !caps.vod => None,
+            (_, ["c"]) if !caps.vod => Some("Clear Recently played (twice)"),
+            (_, ["S"]) if !caps.archive => None,
+            ("GUIDE", ["Enter"]) if !caps.archive => Some("Play live"),
+            (_, ["i"]) if !caps.account => None,
+            _ => Some(what),
+        }
     };
     let columns = KEY_PANEL
         .iter()
         .map(|groups| {
             let groups: Vec<KeyGroup> = groups
                 .iter()
-                .map(|(title, rows)| {
+                .filter_map(|(title, rows)| {
                     let rows: Vec<KeyRow> = rows
                         .iter()
-                        .filter(|(keys, _)| applies(keys))
+                        .filter_map(|(keys, what)| Some((keys, row(title, keys, what)?)))
                         .map(|(keys, what)| {
                             let keys: Vec<slint::SharedString> =
                                 keys.iter().map(|&k| k.into()).collect();
                             KeyRow {
                                 keys: ModelRc::new(VecModel::from(keys)),
-                                action: (*what).into(),
+                                action: what.into(),
                             }
                         })
                         .collect();
-                    KeyGroup {
+                    (!rows.is_empty()).then(|| KeyGroup {
                         title: (*title).into(),
                         rows: ModelRc::new(VecModel::from(rows)),
-                    }
+                    })
                 })
                 .collect();
             KeyColumn {
@@ -409,9 +430,18 @@ fn key_panel() -> (Vec<KeyColumn>, Vec<KeyNote>) {
         .collect();
     let notes = KEY_NOTES
         .iter()
-        .map(|(view, text)| KeyNote {
-            view: (*view).into(),
-            text: (*text).into(),
+        .filter(|(view, _)| caps.account || *view != "Account")
+        .map(|(view, text)| {
+            let text = match *view {
+                "Search" | "Manage" if !caps.vod => text
+                    .replace(" · Tab all kinds", "")
+                    .replace(" · Tab kind", ""),
+                _ => text.to_string(),
+            };
+            KeyNote {
+                view: (*view).into(),
+                text: text.into(),
+            }
         })
         .collect();
     (columns, notes)
@@ -436,6 +466,18 @@ fn library(kind: Kind, provider_cats: Vec<(String, String)>) -> Vec<Category> {
 
 /// How many library entries sit above the kind switch.
 const LIBRARY_FIXED: usize = 3;
+
+/// The library entry `h`/`l` or `[`/`]` step to from `from`, by `d`,
+/// passing over Continue watching without movies and series (M3U ticket
+/// 04).
+fn step_category(categories: &[Category], from: usize, d: isize, vod: bool) -> usize {
+    let last = categories.len().saturating_sub(1);
+    let i = from.saturating_add_signed(d).min(last);
+    match categories.get(i) {
+        Some(Category::Continue) if !vod => i.saturating_add_signed(d.signum()).min(last),
+        _ => i,
+    }
+}
 
 /// The grid row to open on for the main view's channel `key` (SPEC 8.2):
 /// its own, or else the first guide channel after it in the category's
@@ -1161,14 +1203,15 @@ fn guide_blocks(
     origin: i64,
     now: i64,
     marks: &[(i64, store::RecState)],
-    archive_days: i64,
+    archive_days: Option<i64>,
 ) -> Vec<GuideBlock> {
     progs
         .iter()
         .enumerate()
         .filter_map(|(i, p)| {
             let stop = progs.get(i + 1).map_or(p.stop, |n| p.stop.min(n.start));
-            let replay = replayable(p, stop, archive_days, now);
+            // A provider without catch-up marks nothing (M3U ticket 04).
+            let replay = archive_days.and_then(|d| replayable(p, stop, d, now));
             (p.start < stop).then(|| GuideBlock {
                 title: p.title.as_str().into(),
                 times: span(p).into(),
@@ -1539,6 +1582,9 @@ struct Guide {
     /// Each provider's server clock offset from its latest account check:
     /// tables give times in it (SPEC 6.1), so none are asked for before.
     offsets: RefCell<HashMap<String, i64>>,
+    /// The provider shown has catch-up ([`config::Capabilities::archive`]): rows
+    /// are marked and ask for tables only then.
+    archive: Cell<bool>,
 }
 
 impl Guide {
@@ -1576,8 +1622,9 @@ impl Guide {
         let provider_id = self.provider_id.borrow();
         let offset = self.offsets.borrow().get(&*provider_id).copied();
         // Tables are the provider's guide: none for a channel whose guide
-        // is a source's.
+        // is a source's, or on a provider without catch-up.
         let guide_id = match row.guide_id.as_deref() {
+            _ if !self.archive.get() => None,
             Some(g) if store::is_source_guide(g) => None,
             _ => row.epg_channel_id.as_ref(),
         };
@@ -1681,7 +1728,8 @@ impl Model for Guide {
         self.ask_table(i, key, &row, &progs, now);
         let marks = self.marks.borrow();
         let marks = marks.get(&row.stream_id).map_or(&[][..], Vec::as_slice);
-        let blocks = guide_blocks(&progs, self.origin.get(), now, marks, row.archive_days);
+        let archive = self.archive.get().then_some(row.archive_days);
+        let blocks = guide_blocks(&progs, self.origin.get(), now, marks, archive);
         let model = {
             let mut models = self.blocks.borrow_mut();
             // Held for the rows scrolled through; a full cache starts over.
@@ -3052,6 +3100,19 @@ fn account_text(a: &AccountInfo, now: i64) -> (String, Urgency) {
         },
         (None, None) => ("No expiry".into(), Urgency::None),
     }
+}
+
+/// The status bar's expiry warning (SPEC 6.3): none more than 7 days out,
+/// or on a provider without an account (M3U ticket 04).
+fn status_account(
+    caps: config::Capabilities,
+    a: Option<&AccountInfo>,
+    now: i64,
+) -> (String, Urgency) {
+    a.filter(|_| caps.account)
+        .map(|a| account_text(a, now))
+        .filter(|(_, urgency)| *urgency != Urgency::None)
+        .unwrap_or_default()
 }
 
 /// The account dashboard's contents (ticket 21), from the last check if
@@ -4518,9 +4579,19 @@ impl Screen {
         &self.sources[self.active].provider
     }
 
+    /// What the provider shown offers (M3U ticket 04).
+    fn caps(&self) -> config::Capabilities {
+        self.provider().source.caps()
+    }
+
     /// Re-reads categories and the current view, e.g. after an import. The
     /// category and selection stay put if the category still exists.
     fn reload(&mut self) -> Result<(), String> {
+        let caps = self.caps();
+        if !caps.vod {
+            self.kind = Kind::Live;
+        }
+        self.show_caps(caps);
         let provider_cats =
             store::categories(&self.conn, &self.provider().id, self.kind, self.order)
                 .map_err(|e| format!("reading categories: {e}"))?;
@@ -4551,6 +4622,7 @@ impl Screen {
         w.set_order_az(self.order == Order::Az);
         let kept = old
             .get(self.category)
+            .filter(|c| caps.vod || **c != Category::Continue)
             .and_then(|c| self.categories.iter().position(|n| n == c));
         // Otherwise the kind's All.
         self.category = kept.unwrap_or(LIBRARY_FIXED);
@@ -4568,6 +4640,17 @@ impl Screen {
             self.load_manage();
         }
         Ok(())
+    }
+
+    /// Hides what the provider shown lacks (M3U ticket 04): the kind
+    /// switches, Continue watching, the account and their keys.
+    fn show_caps(&self, caps: config::Capabilities) {
+        let w = self.window();
+        w.set_has_vod(caps.vod);
+        w.set_has_account(caps.account);
+        let (columns, notes) = key_panel(caps);
+        w.set_key_columns(ModelRc::new(VecModel::from(columns)));
+        w.set_key_notes(ModelRc::new(VecModel::from(notes)));
     }
 
     fn set_category(&mut self, i: usize) -> Result<(), String> {
@@ -4807,6 +4890,7 @@ impl Screen {
                 (Some(_), true) => {
                     format!("in Live, Movies and Series  ·  Tab: {scope} only  ·  {keep}")
                 }
+                (None, _) if !self.caps().vod => format!("in {}  ·  {keep}", cat.name()),
                 (None, _) => format!("in {}  ·  Tab: all kinds  ·  {keep}", cat.name()),
             }
             .into(),
@@ -4882,8 +4966,9 @@ impl Screen {
     /// Tab, Shift-Tab or a click on the kind switch: manage another kind's
     /// categories (VOD ticket 02). The filter stays.
     fn manage_kind(&mut self, kind: Kind) {
+        let vod = self.caps().vod;
         let Some(m) = &mut self.manage else { return };
-        if m.kind == kind {
+        if m.kind == kind || !vod {
             return;
         }
         m.kind = kind;
@@ -5275,8 +5360,8 @@ impl Screen {
     /// which the main view follows. The grid starts at its top, at the same
     /// time.
     fn guide_category(&mut self, d: isize) {
-        let i = self.category.saturating_add_signed(d);
-        if i >= self.categories.len() || i == self.category {
+        let i = step_category(&self.categories, self.category, d, self.caps().vod);
+        if i == self.category {
             return;
         }
         if let Err(e) = self.set_category(i) {
@@ -5338,8 +5423,10 @@ impl Screen {
             log::error!("reading archives: {e}");
             HashMap::new()
         });
+        let archive = self.caps().archive;
+        self.guide.archive.set(archive);
         let days = self.guide_base.iter().filter_map(|k| archives.get(k)).max();
-        self.guide_back = guide_back(days.copied().unwrap_or(0));
+        self.guide_back = guide_back(days.copied().filter(|_| archive).unwrap_or(0));
         log::debug!(
             "guide {:?}: {} channels in {} µs",
             cat.name(),
@@ -5616,14 +5703,15 @@ impl Screen {
                         log::error!("reading recordings: {e}");
                         None
                     });
-            let replay = replayable(p, slot.to, row.archive_days, now);
+            let archive = self.caps().archive;
+            let replay = replayable(p, slot.to, row.archive_days, now).filter(|_| archive);
             Some(GuideDetail {
                 channel: channel.into(),
                 title: p.title.as_str().into(),
                 times: guide_times(p, now).into(),
                 replay: match replay {
                     Some(Ok(())) => CATCH_UP_HINT,
-                    None if row.archive_days > 0 && slot.from <= now => START_OVER_HINT,
+                    None if archive && row.archive_days > 0 && slot.from <= now => START_OVER_HINT,
                     _ => "",
                 }
                 .into(),
@@ -5641,7 +5729,8 @@ impl Screen {
 
     /// Enter in the grid (SPEC 8.2): a past programme the archive keeps
     /// plays from its start; on one it does not, or a past gap, the status
-    /// bar says why. Now or later plays the channel live.
+    /// bar says why. Now or later plays the channel live. Past ones do
+    /// nothing on a provider without catch-up (M3U ticket 04).
     fn guide_play(&mut self) {
         let now = import::unix_now();
         let Some((i, slot)) = self.guide.sel.borrow().clone() else {
@@ -5652,6 +5741,9 @@ impl Screen {
         };
         if slot.to > now {
             return self.play_key(key);
+        }
+        if !self.caps().archive {
+            return;
         }
         let Some(p) = slot.programme else {
             return self.set_status("Nothing to play: the guide has no programme here");
@@ -5692,11 +5784,15 @@ impl Screen {
 
     /// `S` in the list (SPEC 8.3): the programme airing now on the channel
     /// playing, from its start; a movie or episode playing from its own
-    /// (VOD ticket 07). Nothing while mpv is closed.
+    /// (VOD ticket 07). Nothing while mpv is closed, or for a channel on a
+    /// provider without catch-up (M3U ticket 04).
     fn start_over_playing(&mut self) {
         if self.movie_playing() {
             self.control(Control::Restart);
             return self.set_status("From the start");
+        }
+        if !self.caps().archive {
+            return;
         }
         let now = import::unix_now();
         let Some(key) = self
@@ -6500,7 +6596,10 @@ impl Screen {
                 .map(|(since, _)| rec_elapsed(since.elapsed()))
                 .unwrap_or_default()
                 .into(),
-            start_over: match row.as_ref().is_some_and(|r| r.archive_days > 0) && on_now.is_some() {
+            start_over: match self.caps().archive
+                && row.as_ref().is_some_and(|r| r.archive_days > 0)
+                && on_now.is_some()
+            {
                 true => START_OVER_HINT.into(),
                 false => Default::default(),
             },
@@ -7921,12 +8020,11 @@ impl Screen {
         let w = self.window();
         let source = &self.sources[self.active];
         w.set_provider_name(source.provider.name.as_str().into());
-        let (account, urgency) = source
-            .info
-            .as_ref()
-            .map(|a| account_text(a, import::unix_now()))
-            .filter(|(_, urgency)| *urgency != Urgency::None)
-            .unwrap_or_default();
+        let (account, urgency) = status_account(
+            source.provider.source.caps(),
+            source.info.as_ref(),
+            import::unix_now(),
+        );
         w.set_account_status(account.into());
         w.set_account_urgency(urgency);
         w.set_refresh_status(source.refresh.as_str().into());
@@ -8050,6 +8148,9 @@ impl Screen {
     /// `i` or a click on the status bar's account: shows the last check at
     /// once and asks for a fresh one, so active connections are current.
     fn open_dashboard(&mut self) {
+        if !self.caps().account {
+            return;
+        }
         let source = &self.sources[self.active];
         let checking = source.refresh_tx.send(Request::Account).is_ok();
         self.dashboard = Some(Dashboard {
@@ -10744,7 +10845,10 @@ impl Screen {
             }
         } else if self.searching {
             if text.chars().eq([char::from(slint::platform::Key::Tab)]) {
-                self.toggle_wide();
+                // Movies and series are what widening adds.
+                if self.caps().vod {
+                    self.toggle_wide();
+                }
                 return true;
             }
             match search_key(text, ctrl) {
@@ -10761,6 +10865,9 @@ impl Screen {
                 None => return false,
             }
         };
+        if lacking(action, self.caps(), self.guide_open) {
+            return true;
+        }
         if self.series.focused && self.episodes_key(&action) {
             return true;
         }
@@ -10809,7 +10916,8 @@ impl Screen {
             Action::GuideCategory(_) => {}
             Action::Cycle(d) => self.cycle_kind(d),
             Action::Category(d) => {
-                if let Err(e) = self.set_category(clamp(self.category as isize + d)) {
+                let i = step_category(&self.categories, self.category, d, self.caps().vod);
+                if let Err(e) = self.set_category(i) {
                     log::error!("{e}");
                     self.set_error(&e);
                 }
@@ -11152,7 +11260,8 @@ pub fn run(
     // Wayland app id for compositor window rules; mpv's is `vidicon-mpv`.
     // Must be set before the window is shown.
     slint::set_xdg_app_id("vidicon").map_err(|e| e.to_string())?;
-    let (key_columns, key_notes) = key_panel();
+    // In full until a provider shows ([`Screen::show_caps`]).
+    let (key_columns, key_notes) = key_panel(config::Source::Xtream.caps());
     window.set_key_columns(ModelRc::new(VecModel::from(key_columns)));
     window.set_key_notes(ModelRc::new(VecModel::from(key_notes)));
     let sections: Vec<slint::SharedString> = SETTINGS_SECTIONS.map(Into::into).into();
@@ -11310,6 +11419,7 @@ pub fn run(
         tables: tables_tx,
         asked: RefCell::default(),
         offsets: RefCell::default(),
+        archive: Cell::new(true),
     });
     window.set_guide_rows(ModelRc::from(
         guide.clone() as Rc<dyn Model<Data = GuideItem>>
@@ -12221,7 +12331,7 @@ mod tests {
             36_000,
             36_000 + 2 * 1800 + 60,
             &[],
-            0,
+            Some(0),
         );
         let got: Vec<(String, f32, f32, bool, i32)> = blocks
             .iter()
@@ -12236,7 +12346,7 @@ mod tests {
                 ("4".into(), 4.0, 16.0, false, 7200),
             ]
         );
-        assert!(guide_blocks(&[], 36_000, 36_000, &[], 0).is_empty());
+        assert!(guide_blocks(&[], 36_000, 36_000, &[], Some(0)).is_empty());
     }
 
     /// A recording of Football Tonight on Northwind Sport 1, `id` and from
@@ -12470,7 +12580,7 @@ mod tests {
             (5400, RecState::Scheduled),
             (9000, RecState::Scheduled),
         ];
-        let got: Vec<RecMark> = guide_blocks(&progs, 0, 2000, &marks, 0)
+        let got: Vec<RecMark> = guide_blocks(&progs, 0, 2000, &marks, Some(0))
             .iter()
             .map(|b| b.rec)
             .collect();
@@ -12988,9 +13098,17 @@ mod tests {
                 .collect()
         };
         // Too old, kept, airing.
-        assert_eq!(marks(3), [(false, true), (true, false), (false, false)]);
+        assert_eq!(
+            marks(Some(3)),
+            [(false, true), (true, false), (false, false)]
+        );
         // No archive: every past one dimmed.
-        assert_eq!(marks(0), [(false, true), (false, true), (false, false)]);
+        assert_eq!(
+            marks(Some(0)),
+            [(false, true), (false, true), (false, false)]
+        );
+        // No catch-up on the provider: neither (M3U ticket 04).
+        assert_eq!(marks(None), [(false, false); 3]);
     }
 
     /// mpv's title says what is replayed, and never holds the URL (SPEC
@@ -13647,7 +13765,7 @@ mod tests {
 
     #[test]
     fn expiry_warns_within_a_week() {
-        use super::{AccountInfo, Urgency, account_text, end_of_day};
+        use super::{AccountInfo, Urgency, account_text, end_of_day, status_account};
         use crate::xtream::{Blocked, ServerInfo, UserInfo};
         // Local noon, so whole days later stay on the clock.
         let now = end_of_day(1_790_000_000) - 12 * 3600;
@@ -13689,6 +13807,23 @@ mod tests {
             at(now + 30 * 86_400, Some(Blocked::Disabled("Banned".into()))),
             ("Account banned".into(), Urgency::Danger)
         );
+        // The status bar: nothing without an account (M3U ticket 04).
+        let a = AccountInfo {
+            user: UserInfo {
+                exp_date: Some(now + 86_400),
+                ..Default::default()
+            },
+            server: ServerInfo::default(),
+            blocked: None,
+            checked: now,
+        };
+        let caps = crate::config::Source::Xtream.caps();
+        assert_eq!(status_account(caps, Some(&a), now).1, Urgency::Danger);
+        let caps = crate::config::Capabilities {
+            account: false,
+            ..caps
+        };
+        assert_eq!(status_account(caps, Some(&a), now), Default::default());
     }
 
     #[test]
@@ -13902,7 +14037,7 @@ mod tests {
         }
         // `p` with one provider too: the picker adds one (onboarding
         // ticket 01).
-        let (columns, notes) = key_panel();
+        let (columns, notes) = key_panel(crate::config::Source::Xtream.caps());
         let keys = |columns: &[super::KeyColumn]| -> Vec<String> {
             columns
                 .iter()
@@ -13913,5 +14048,109 @@ mod tests {
         };
         assert!(keys(&columns).contains(&"p".to_string()));
         assert!(notes.iter().any(|n| n.view == "Provider picker"));
+    }
+
+    /// Each capability an M3U provider lacks hides its keys on the panel
+    /// and makes them do nothing (M3U ticket 04).
+    #[test]
+    fn a_missing_capability_hides_and_disables_its_keys() {
+        use super::{Action, Category, KeyColumn, KeyNote, key_panel, lacking, step_category};
+        use crate::config::{Capabilities, Source};
+        use crate::store::Kind;
+        use slint::Model;
+        let all = Source::Xtream.caps();
+        assert_eq!(
+            Source::M3u.caps(),
+            Capabilities {
+                archive: false,
+                vod: false,
+                account: false
+            }
+        );
+        let rows = |(columns, _): &(Vec<KeyColumn>, Vec<KeyNote>)| -> Vec<(String, String)> {
+            let mut out = Vec::new();
+            for c in columns {
+                for g in c.groups.iter() {
+                    for r in g.rows.iter() {
+                        let keys: Vec<String> = r.keys.iter().map(|k| k.to_string()).collect();
+                        out.push((keys.join(" "), r.action.to_string()));
+                    }
+                }
+            }
+            out
+        };
+        let groups = |(columns, _): &(Vec<KeyColumn>, Vec<KeyNote>)| -> Vec<String> {
+            columns
+                .iter()
+                .flat_map(|c| {
+                    c.groups
+                        .iter()
+                        .map(|g| g.title.to_string())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        let has = |panel: &(Vec<KeyColumn>, Vec<KeyNote>), keys: &str| {
+            rows(panel).iter().any(|(k, _)| k == keys)
+        };
+        let full = key_panel(all);
+        for keys in ["i", "S", "w", "Tab ⇧Tab"] {
+            assert!(has(&full, keys), "{keys}");
+        }
+
+        // No account: `i` and the dashboard's note go.
+        let caps = Capabilities {
+            account: false,
+            ..all
+        };
+        let panel = key_panel(caps);
+        assert!(!has(&panel, "i"));
+        assert!(!panel.1.iter().any(|n| n.view == "Account"));
+        assert!(lacking(Action::Account, caps, false));
+        assert!(!lacking(Action::Account, all, false));
+
+        // No catch-up: `S` goes, Enter in the grid only plays live.
+        let caps = Capabilities {
+            archive: false,
+            ..all
+        };
+        let panel = key_panel(caps);
+        assert!(!has(&panel, "S"));
+        assert!(rows(&panel).contains(&("Enter".into(), "Play live".into())));
+        assert!(lacking(Action::StartOver, caps, true));
+        // In the list it still restarts a movie.
+        assert!(!lacking(Action::StartOver, caps, false));
+        assert!(!lacking(Action::StartOver, all, true));
+
+        // No movies and series: their group, the kind keys and Tab's notes go.
+        let caps = Capabilities { vod: false, ..all };
+        let panel = key_panel(caps);
+        assert!(!groups(&panel).contains(&"MOVIES AND SERIES".to_string()));
+        assert!(!has(&panel, "Tab ⇧Tab"));
+        assert!(rows(&panel).contains(&("c".into(), "Clear Recently played (twice)".into())));
+        assert!(panel.1.iter().all(|n| !n.text.contains("Tab all kinds")));
+        assert!(panel.1.iter().all(|n| !n.text.contains("Tab kind")));
+        for a in [
+            Action::Cycle(1),
+            Action::Watched,
+            Action::Download,
+            Action::DownloadSeason,
+        ] {
+            assert!(lacking(a, caps, false), "{a:?}");
+            assert!(!lacking(a, all, false), "{a:?}");
+        }
+        // Tab in the grid steps through categories still.
+        assert!(!lacking(Action::Cycle(1), caps, true));
+        // `S` on a live channel does nothing with neither.
+        assert!(lacking(Action::StartOver, Source::M3u.caps(), false));
+
+        // `h`/`l` pass over Continue watching without movies and series.
+        let library = super::library(Kind::Live, vec![("1".into(), "News".into())]);
+        assert_eq!(library[2], Category::Continue);
+        assert_eq!(step_category(&library, 1, 1, false), 3);
+        assert_eq!(step_category(&library, 3, -1, false), 1);
+        assert_eq!(step_category(&library, 1, 1, true), 2);
+        assert_eq!(step_category(&library, 4, 1, false), 4);
+        assert_eq!(step_category(&library, 0, -1, false), 0);
     }
 }
