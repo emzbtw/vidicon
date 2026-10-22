@@ -1,6 +1,8 @@
 //! Xtream Codes client (SPEC 6): rate-limited HTTP and credential redaction.
 
-use crate::config::Provider;
+use crate::config::{Provider, Source};
+use crate::m3u::Headers;
+use crate::store;
 use bytes::Bytes;
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
@@ -164,11 +166,13 @@ impl Gate {
     }
 }
 
-/// The HTTP client for provider and logo requests, with the honest
-/// `User-Agent` (SPEC 6.2).
+/// The honest `User-Agent` (SPEC 6.2).
+pub const USER_AGENT: &str = concat!("vidicon/", env!("CARGO_PKG_VERSION"));
+
+/// The HTTP client for provider and logo requests, with [`USER_AGENT`].
 pub fn http() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent(concat!("vidicon/", env!("CARGO_PKG_VERSION")))
+        .user_agent(USER_AGENT)
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(300))
         .build()
@@ -824,6 +828,33 @@ impl Client {
         Ok(url)
     }
 
+    /// What a live channel plays from (M3U ticket 03): an M3U channel's
+    /// stored URL with its headers, the provider's `user_agent`, else
+    /// [`USER_AGENT`], for a stream that sets none; an Xtream channel's
+    /// [`Client::stream_url`] with none, so mpv and ffmpeg send their own.
+    /// Never log the URL.
+    pub fn live_stream(
+        &self,
+        stream_id: i64,
+        c: &store::ChannelStream,
+    ) -> Result<(String, Option<Headers>), String> {
+        let provider = self.provider();
+        match provider.source {
+            Source::Xtream => Ok((self.stream_url(stream_id, &c.extension)?.to_string(), None)),
+            Source::M3u => {
+                let url = c
+                    .url
+                    .clone()
+                    .ok_or_else(|| format!("{}: the channel has no stream URL", provider.name))?;
+                let mut headers = c.headers.clone();
+                headers
+                    .user_agent
+                    .get_or_insert_with(|| provider.user_agent.unwrap_or(USER_AGENT.into()));
+                Ok((url, Some(headers)))
+            }
+        }
+    }
+
     /// `{url}/{kind}/{username}/{password}/{id}.{ext}`, `kind` `movie` or
     /// `series` (an episode's id). Never log it unredacted.
     pub fn vod_url(&self, kind: &str, id: i64, ext: &str) -> Result<Url, String> {
@@ -1365,6 +1396,63 @@ mod tests {
             shown.contains("stream=42&start=2026-10-01%3A20-00&duration=60"),
             "{shown}"
         );
+    }
+
+    /// M3U ticket 03: an M3U channel plays its stored URL and headers, the
+    /// provider's user agent or ours for a stream that sets none; an Xtream
+    /// channel gets no headers.
+    #[test]
+    fn live_stream_by_source() {
+        use crate::m3u::Headers;
+        use crate::store::ChannelStream;
+        let provider = |source, user_agent: Option<&str>| {
+            super::Client::new(crate::config::Provider {
+                id: "p".into(),
+                name: "P".into(),
+                url: "http://h:8080".into(),
+                username: "u".into(),
+                password: "pw".into(),
+                epg: Vec::new(),
+                source,
+                user_agent: user_agent.map(Into::into),
+            })
+        };
+        let channel = |url: Option<&str>, user_agent: Option<&str>| ChannelStream {
+            extension: "ts".into(),
+            url: url.map(Into::into),
+            headers: Headers {
+                user_agent: user_agent.map(Into::into),
+                referrer: Some("https://r.example/".into()),
+                origin: None,
+            },
+        };
+        let agent = |h: Option<Headers>| h.unwrap().user_agent.unwrap();
+        let m3u = provider(crate::config::Source::M3u, None);
+        let (url, headers) = m3u
+            .live_stream(7, &channel(Some("http://s/1.ts"), None))
+            .unwrap();
+        assert_eq!(url, "http://s/1.ts");
+        assert_eq!(
+            headers.as_ref().unwrap().referrer.as_deref(),
+            Some("https://r.example/")
+        );
+        assert_eq!(agent(headers), super::USER_AGENT);
+        let m3u = provider(crate::config::Source::M3u, Some("Example/1.0"));
+        let (_, headers) = m3u
+            .live_stream(7, &channel(Some("http://s/1.ts"), None))
+            .unwrap();
+        assert_eq!(agent(headers), "Example/1.0");
+        let (_, headers) = m3u
+            .live_stream(7, &channel(Some("http://s/1.ts"), Some("Own/2")))
+            .unwrap();
+        assert_eq!(agent(headers), "Own/2");
+        assert!(m3u.live_stream(7, &channel(None, None)).is_err());
+        let xtream = provider(crate::config::Source::Xtream, None);
+        let (url, headers) = xtream
+            .live_stream(7, &channel(None, Some("Own/2")))
+            .unwrap();
+        assert_eq!(url, "http://h:8080/live/u/pw/7.ts");
+        assert_eq!(headers, None);
     }
 
     /// The add-provider form's check (onboarding ticket 01): each outcome

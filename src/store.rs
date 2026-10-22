@@ -4,6 +4,7 @@
 //! writer connection imports, and sees the previous snapshot until commit.
 
 use crate::epg_sources::epg_norm;
+use crate::m3u::Headers;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -409,6 +410,16 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE channel ADD COLUMN url TEXT;
      ALTER TABLE channel ADD COLUMN tvg_name TEXT;
      ALTER TABLE provider ADD COLUMN playlist_mtime INTEGER;",
+    // 30: an M3U channel's stream headers (M3U ticket 03), NULL when its
+    // playlist sets none. A URL stored with its `|` suffix (ticket 02)
+    // loses it; its headers come with the next import, which a playlist
+    // file gets at once.
+    "ALTER TABLE channel ADD COLUMN user_agent TEXT;
+     ALTER TABLE channel ADD COLUMN referrer TEXT;
+     ALTER TABLE channel ADD COLUMN origin TEXT;
+     UPDATE channel SET url = rtrim(substr(url, 1, instr(url, '|') - 1))
+         WHERE instr(url, '|') > 0;
+     UPDATE provider SET playlist_mtime = NULL;",
 ];
 
 /// Whether a category or title is live, a movie or a series (VOD ticket 02).
@@ -555,6 +566,16 @@ pub struct NewChannel<'a> {
     /// An M3U channel's stream URL (M3U ticket 02).
     pub url: Option<&'a str>,
     pub tvg_name: Option<&'a str>,
+    /// An M3U channel's stream headers (M3U ticket 03).
+    pub headers: Option<&'a Headers>,
+}
+
+/// Where a channel's stream is (M3U ticket 03): an Xtream channel's
+/// extension, or an M3U channel's URL and headers.
+pub struct ChannelStream {
+    pub extension: String,
+    pub url: Option<String>,
+    pub headers: Headers,
 }
 
 /// Opens (creating if needed) and migrates the database. Call once for the
@@ -2847,8 +2868,8 @@ pub fn insert_channel(tx: &Connection, provider_id: &str, c: &NewChannel) -> rus
     tx.prepare_cached(
         "INSERT OR REPLACE INTO channel (provider_id, stream_id, num, name, name_norm,
              category_id, epg_channel_id, icon_url, extension, archive_days, name_loose,
-             url, tvg_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             url, tvg_name, user_agent, referrer, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
     )?
     .execute(params![
         provider_id,
@@ -2864,6 +2885,9 @@ pub fn insert_channel(tx: &Connection, provider_id: &str, c: &NewChannel) -> rus
         loose_name(c.name),
         c.url,
         c.tvg_name,
+        c.headers.and_then(|h| h.user_agent.as_deref()),
+        c.headers.and_then(|h| h.referrer.as_deref()),
+        c.headers.and_then(|h| h.origin.as_deref()),
     ])?;
     Ok(())
 }
@@ -4778,15 +4802,28 @@ pub fn settle_downloads(conn: &Connection) -> rusqlite::Result<usize> {
     )
 }
 
-/// A channel's stream extension, if the provider still lists it.
-pub fn channel_extension(
+/// Where a channel's stream is, if the provider still lists it.
+pub fn channel_stream(
     conn: &Connection,
     provider_id: &str,
     stream_id: i64,
-) -> rusqlite::Result<Option<String>> {
-    conn.prepare_cached("SELECT extension FROM channel WHERE provider_id = ?1 AND stream_id = ?2")?
-        .query_row(params![provider_id, stream_id], |r| r.get(0))
-        .optional()
+) -> rusqlite::Result<Option<ChannelStream>> {
+    conn.prepare_cached(
+        "SELECT extension, url, user_agent, referrer, origin FROM channel
+         WHERE provider_id = ?1 AND stream_id = ?2",
+    )?
+    .query_row(params![provider_id, stream_id], |r| {
+        Ok(ChannelStream {
+            extension: r.get(0)?,
+            url: r.get(1)?,
+            headers: Headers {
+                user_agent: r.get(2)?,
+                referrer: r.get(3)?,
+                origin: r.get(4)?,
+            },
+        })
+    })
+    .optional()
 }
 
 /// Quality tags that do not change which channel it is. `+1` style timeshift
@@ -5058,6 +5095,7 @@ mod tests {
                 archive_days: 0,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }
@@ -5208,6 +5246,29 @@ mod tests {
     }
 
     #[test]
+    fn migration_30_cuts_the_header_suffix_off_stored_urls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v.db");
+        {
+            let mut conn = open(&path).unwrap();
+            import_lists(&mut conn, &[("1", "Sport")], &[(1, 1, "Northwind", "1")]);
+            conn.execute_batch(
+                "UPDATE channel SET url = 'http://s/1.ts |User-Agent=A';
+                 UPDATE provider SET playlist_mtime = 5;
+                 ALTER TABLE channel DROP COLUMN user_agent;
+                 ALTER TABLE channel DROP COLUMN referrer;
+                 ALTER TABLE channel DROP COLUMN origin;
+                 PRAGMA user_version = 29;",
+            )
+            .unwrap();
+        }
+        let conn = open(&path).unwrap();
+        let stream = channel_stream(&conn, "p", 1).unwrap().unwrap();
+        assert_eq!(stream.url.as_deref(), Some("http://s/1.ts"));
+        assert_eq!(playlist_mtime(&conn, "p").unwrap(), None);
+    }
+
+    #[test]
     fn migration_28_fills_the_looser_name_of_stored_channels() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("v.db");
@@ -5224,6 +5285,9 @@ mod tests {
                  ALTER TABLE channel DROP COLUMN url;
                  ALTER TABLE channel DROP COLUMN tvg_name;
                  ALTER TABLE provider DROP COLUMN playlist_mtime;
+                 ALTER TABLE channel DROP COLUMN user_agent;
+                 ALTER TABLE channel DROP COLUMN referrer;
+                 ALTER TABLE channel DROP COLUMN origin;
                  PRAGMA user_version = 27;",
             )
             .unwrap();
@@ -5267,6 +5331,7 @@ mod tests {
                 archive_days: 0,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }
@@ -6389,6 +6454,7 @@ mod tests {
                 archive_days: 0,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             insert_channel(&tx, "p", &c).unwrap();
         }

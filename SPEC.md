@@ -442,13 +442,15 @@ source_mapping (provider_id, ident, stream_id INTEGER, channel_id, name_norm,
 
 - **M3U channels** (M3U ticket 02, 6.4, 7.1): an M3U provider's
   entries are all live channels. `url` is the entry's stream URL as the
-  playlist gives it, any `|` suffix of headers included, NULL on an
+  playlist gives it, without a `|` suffix of headers, NULL on an
   Xtream channel; `tvg_name` its `tvg-name`, for guide matching.
+  `user_agent`, `referrer` and `origin` are the stream's headers (M3U
+  ticket 03, 9.1), NULL where the playlist sets none.
   `stream_id` is a stable 63-bit hash (FNV-1a, the same in every build)
   of the entry's key, `tvg-id`, else `tvg-name`, else the title: the
   key's alone for the first entry with that key, so a backup added after
   a channel leaves its id alone; for a later one, with its URL's hash
-  (without the suffix) and its place among the entries sharing both.
+  and its place among the entries sharing both.
   Categories are the groups, by name as their id, in the order first
   met. `extension` is empty and `archive_days` 0.
   `provider.playlist_mtime` is a playlist path's modification time in
@@ -1082,8 +1084,14 @@ build.
   transaction that replaces its categories and channels, then the
   favourites fallback and the rest of a channel import run. An entry runs
   from `#EXTINF` to the next non-empty line that is not a `#` line, its
-  URL, with no scheme or length check; `#EXTVLCOPT`, `#KODIPROP`, other
-  `#` lines and blank lines are skipped. A URL with no `#EXTINF` is kept,
+  URL, with no scheme or length check. `#EXTVLCOPT` lines between the
+  `#EXTINF` and the URL set the stream's headers (M3U ticket 03):
+  `http-user-agent`, `http-referrer` and `http-origin`; a Kodi-style
+  suffix on the URL (`url|User-Agent=...&Referer=...&Origin=...`, keys
+  in any case, values percent-decoded) sets those it leaves unset, and
+  is cut off the URL. A value holding a control character is dropped.
+  Other `#EXTVLCOPT` options, `#KODIPROP`, other `#` lines and blank
+  lines are skipped. A URL with no `#EXTINF` is kept,
   named after its path's last segment; an `#EXTINF` with no URL is
   skipped and counted, shown in the refresh panel (`12 entries
   skipped`). A UTF-8 BOM, CRLF, attribute values double-quoted,
@@ -1996,6 +2004,19 @@ mpv --idle=yes --force-window=yes \
   resuming `["loadfile", "<url>", "replace", -1, "start=<secs>"]` (VOD
   ticket 07). The title goes first so the
   URL is never used as the title, not even briefly.
+- M3U channels (M3U ticket 03) play their stored `url` (5) with their
+  headers as `loadfile` options, so mpv sets them for that file alone
+  and they never reach the next one: `user-agent` (the stream's, else
+  the provider's `user_agent`, else `vidicon/<version>`), `referrer`,
+  and `http-header-fields` with an `Origin:` line. Each value is
+  written `%<bytes>%<value>`, which mpv takes as is, and the `Origin`
+  line's commas are escaped (`\,`) as it is a list item:
+  `["loadfile", "<url>", "replace", -1, "user-agent=%11%Example/1.0,referrer=%18%https://r.example/"]`.
+  An Xtream channel's `loadfile` has no header options, so mpv sends
+  its own user agent as before. Checked with mpv 0.41 against a local
+  server: the headers arrive, commas in the user agent and the origin
+  survive, and the next
+  plain `loadfile` sends mpv's own agent and no referrer.
 - mpv's stdout and stderr are discarded: mpv prints the stream URL there.
 - `--title` pins mpv's default title template, so a user `mpv.conf` title
   built from `${path}` or `${filename}` cannot expose the URL.
@@ -2060,7 +2081,8 @@ connections) in the app's status area with the channel name.
 
 Drops (stream recovery ticket 01). `RUST_LOG=vidicon::player=debug`
 logs each `end-file` `eof` or `error` of the latest `loadfile`: its kind
-(live, catch-up, movie, episode, read from the URL's path), mpv's reason
+(live, catch-up, movie, episode, read from the URL's path; an M3U
+channel's is always live, M3U ticket 03), mpv's reason
 and `file_error`, the seconds since the `loadfile`, how many of them were
 paused, and whether it is paused now or how long since it resumed. No
 title or URL.
@@ -2123,7 +2145,7 @@ first; the app plays a channel again only once mpv gives up.
   milestone's Open). Stop and closing mpv end with `quit`, not a drop.
 - **Retries:** two, 3 s after the drop and 10 s after the first fails,
   each a `loadfile` of the same channel at the live edge, unpaused, as
-  `L` does. Once one plays (its `playback-restart`) the status bar's
+  `L` does, with the same headers for an M3U channel (9.1). Once one plays (its `playback-restart`) the status bar's
   `RECONNECTING` clears (8.2); after the second fails the app gives up
   with the last reason (`the stream ended` for an `eof`). A later drop
   starts again from the first. They are mpv's loads, which 6.2's limits
@@ -2276,7 +2298,10 @@ user timer, so they run with the app closed, may come later.
   scheduled; a re-import moves both with the programme (7.1).
 - **Start:** at the padded start, `ffmpeg -nostdin -hide_banner -loglevel
   error -i <stream url> -c copy -f mpegts -y <file>`, on a connection of
-  its own: the provider's `.ts` as is. The file is named as in 9.4, with
+  its own: the provider's `.ts` as is. An M3U channel's stream (M3U
+  ticket 03) is its stored `url`, with its headers (9.1) before the
+  `-i`: `-user_agent <agent> -referer <referrer> -headers "Origin:
+  <origin>\r\n"`. The file is named as in 9.4, with
   the guide's start time, and reserved the same way. `ffmpeg_path` sets
   the program. Like mpv it gets `PR_SET_PDEATHSIG`, so it dies with the
   app.
@@ -2290,7 +2315,8 @@ user timer, so they run with the app closed, may come later.
   from that provider) plus the running recordings exceed
   `max_connections` is refused: `failed`, with the counts in its note
   (`no free connection (the account's limit is 2; in use: watching, 1
-  recording)`). Not retried.
+  recording)`). Not retried. An M3U provider has no account, so no
+  limit (M3U ticket 03).
 - **Failures:** ffmpeg exiting before the padded stop, for any reason, or
   not starting at all, is `failed` with ffmpeg's last error line (or the
   spawn error) as its note, redacted (4.1) as ffmpeg quotes the URL. An

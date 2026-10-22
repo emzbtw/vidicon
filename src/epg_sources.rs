@@ -662,6 +662,7 @@ mod tests {
                 archive_days,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }

@@ -1,6 +1,6 @@
 # 03: Play and record M3U channels
 
-Status: open. Blocked by: 02.
+Status: done. Blocked by: 02.
 
 ## Goal
 
@@ -25,12 +25,15 @@ ADR 0002. `src/player.rs`, `src/recorder.rs`.
 
 ## Acceptance
 
-- [ ] Tests: the `loadfile` options and ffmpeg arguments for each header
+- [x] Tests: the `loadfile` options and ffmpeg arguments for each header
   source; a stream with none gets the default user agent; headers do not
   leak into the next channel.
-- [ ] Checked with fake mpv against the demo playlist, then by the user
-  playing and recording a real M3U channel that needs a header.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+- [x] Checked with fake mpv against the demo playlist, then by the user
+  playing and recording a real M3U channel that needs a header. Fake
+  mpv: demo channels 7 and 8, and the default on the others. The user
+  recorded what plays; a scheduled recording waits for the playlist's
+  guide (05).
+- [x] `code-review` of the ticket's diff; findings fixed.
 
 ## Out of scope
 

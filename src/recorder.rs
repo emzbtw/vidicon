@@ -19,6 +19,7 @@
 
 use crate::download;
 use crate::import::{Writer, unix_now};
+use crate::m3u::Headers;
 use crate::store::{self, DlState, Download, NewDownload, NewRecording, RecState, Recording};
 use crate::trash;
 use crate::xtream::{self, Clients};
@@ -737,13 +738,13 @@ impl Recorder {
         // A download gives up its connection to a recording.
         self.make_room(&r.provider_id, 1);
         let (provider_id, stream_id) = (r.provider_id.clone(), r.stream_id);
-        let extension = self
-            .db(move |c| store::channel_extension(c, &provider_id, stream_id))
+        let stream = self
+            .db(move |c| store::channel_stream(c, &provider_id, stream_id))
             .await;
-        let Some(extension) = extension else {
+        let Some(stream) = stream else {
             return; // Logged; tried again on the next check.
         };
-        let Some(extension) = extension else {
+        let Some(stream) = stream else {
             let note = format!("{} is no longer in the provider's list", r.channel);
             return self.fail(r.id, &note, false).await;
         };
@@ -751,8 +752,8 @@ impl Recorder {
             let note = "the provider is no longer in the credentials file";
             return self.fail(r.id, note, false).await;
         };
-        let url = match client.stream_url(r.stream_id, &extension) {
-            Ok(url) => url,
+        let (url, headers) = match client.live_stream(r.stream_id, &stream) {
+            Ok(stream) => stream,
             Err(e) => return self.fail(r.id, &e, false).await,
         };
         let name = recording_name(&r.channel, r.title.as_deref(), r.start);
@@ -763,7 +764,7 @@ impl Recorder {
                 return self.fail(r.id, &note, false).await;
             }
         };
-        let child = match spawn(&self.setup.ffmpeg, url.as_str(), &file) {
+        let child = match spawn(&self.setup.ffmpeg, &url, headers.as_ref(), &file) {
             Ok(child) => child,
             Err(e) => {
                 let _ = std::fs::remove_file(&file);
@@ -795,8 +796,13 @@ impl Recorder {
     /// Whether `provider_id` has a connection free for one more recording:
     /// mpv's, if it plays from there, and the recordings running count
     /// against `max_connections`; a download does not, as it gives its
-    /// connection up. An unknown limit counts as 1.
+    /// connection up. An unknown limit counts as 1. An M3U provider has
+    /// no account, so no limit (M3U ticket 03).
     fn free_connection(&self, provider_id: &str) -> Result<(), String> {
+        let m3u = self.clients.get(provider_id);
+        if m3u.is_some_and(|c| c.provider().source == crate::config::Source::M3u) {
+            return Ok(());
+        }
         let max = self.limits.get(provider_id).copied().flatten();
         let watching = self.watching.as_deref() == Some(provider_id);
         let recording = self
@@ -1044,6 +1050,21 @@ fn trash_to(file: &Path, bin: &Path) -> Deleted {
     }
 }
 
+/// ffmpeg's HTTP options for `headers`, before its `-i`.
+fn header_args(headers: &Headers) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(agent) = &headers.user_agent {
+        args.extend(["-user_agent".into(), agent.clone()]);
+    }
+    if let Some(referrer) = &headers.referrer {
+        args.extend(["-referer".into(), referrer.clone()]);
+    }
+    if let Some(origin) = &headers.origin {
+        args.extend(["-headers".into(), format!("Origin: {origin}\r\n")]);
+    }
+    args
+}
+
 async fn sleep(wait: Option<Duration>) {
     match wait {
         Some(wait) => tokio::time::sleep(wait).await,
@@ -1051,12 +1072,22 @@ async fn sleep(wait: Option<Duration>) {
     }
 }
 
-/// `ffmpeg -i <url> -c copy` to `file`, which exists already (reserved).
-/// Its output is errors only: they can quote the URL, so are redacted
-/// before they are kept.
-fn spawn(ffmpeg: &str, url: &str, file: &Path) -> std::io::Result<Child> {
+/// `ffmpeg -i <url> -c copy` to `file`, which exists already (reserved),
+/// sending an M3U channel's `headers` (M3U ticket 03). Its output is
+/// errors only: they can quote the URL, so are redacted before they are
+/// kept.
+fn spawn(
+    ffmpeg: &str,
+    url: &str,
+    headers: Option<&Headers>,
+    file: &Path,
+) -> std::io::Result<Child> {
     let mut cmd = Process::new(ffmpeg);
-    cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i", url])
+    cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
+    if let Some(h) = headers {
+        cmd.args(header_args(h));
+    }
+    cmd.args(["-i", url])
         .args(["-c", "copy", "-f", "mpegts", "-y"])
         .arg(file)
         .stdin(Stdio::null())
@@ -1235,7 +1266,25 @@ exit 1
 
         /// The same in `dir`, as a second run of the app.
         fn again(dir: tempfile::TempDir, url: &str) -> Self {
-            Self::start(dir, RECORDS, 0, 0, url, |_| {})
+            Self::start(dir, RECORDS, 0, 0, xtream(url), |_| {})
+        }
+
+        /// A recorder whose provider is an M3U one, with a user agent.
+        fn m3u(before: impl FnOnce(&Connection)) -> Self {
+            let provider = Provider {
+                url: "http://127.0.0.1:9/tv.m3u".into(),
+                source: crate::config::Source::M3u,
+                user_agent: Some("Example/1.0".into()),
+                ..xtream("")
+            };
+            Self::start(
+                tempfile::tempdir().unwrap(),
+                RECORDS,
+                0,
+                0,
+                provider,
+                before,
+            )
         }
 
         fn at(
@@ -1250,7 +1299,7 @@ exit 1
                 ffmpeg,
                 pad_before,
                 after,
-                url,
+                xtream(url),
                 before,
             )
         }
@@ -1260,7 +1309,7 @@ exit 1
             ffmpeg: &str,
             pad_before: i64,
             after: i64,
-            url: &str,
+            provider: Provider,
             before: impl FnOnce(&Connection),
         ) -> Self {
             let script = dir.path().join("ffmpeg");
@@ -1269,16 +1318,6 @@ exit 1
             let conn = with_channel(dir.path());
             before(&conn);
             let writer: Writer = Arc::new(Mutex::new(conn));
-            let provider = Provider {
-                id: "p".into(),
-                name: "P".into(),
-                url: url.into(),
-                username: "user".into(),
-                password: "secret".into(),
-                epg: Vec::new(),
-                source: crate::config::Source::Xtream,
-                user_agent: None,
-            };
             let clients = [("p".to_string(), Arc::new(Client::new(provider)))]
                 .into_iter()
                 .collect();
@@ -1333,6 +1372,20 @@ exit 1
         }
     }
 
+    /// Xtream provider `p` at `url`.
+    fn xtream(url: &str) -> Provider {
+        Provider {
+            id: "p".into(),
+            name: "P".into(),
+            url: url.into(),
+            username: "user".into(),
+            password: "secret".into(),
+            epg: Vec::new(),
+            source: crate::config::Source::Xtream,
+            user_agent: None,
+        }
+    }
+
     /// A database in `dir` with provider `p`'s channel 1.
     fn with_channel(dir: &Path) -> Connection {
         let mut conn = store::open(&dir.join("v.db")).unwrap();
@@ -1349,6 +1402,7 @@ exit 1
             archive_days: 0,
             url: None,
             tvg_name: None,
+            headers: None,
         };
         store::insert_channel(&tx, "p", &c).unwrap();
         store::finish_channel_import(&tx, "p", 0).unwrap();
@@ -1425,6 +1479,32 @@ exit 1
         );
         assert_eq!(args[6..9], ["-c", "copy", "-f"]);
         assert_eq!(args.last(), Some(&"stopped"), "stopped with SIGTERM");
+    }
+
+    /// M3U ticket 03: an M3U channel records from its stored URL with its
+    /// headers, the provider's user agent for a stream that sets none,
+    /// while one plays: the provider has no connection limit.
+    #[tokio::test]
+    async fn an_m3u_channel_records_with_its_headers() {
+        let mut f = Fake::m3u(|c| {
+            c.execute(
+                "UPDATE channel SET url = 'http://s.example/1.m3u8?token=t',
+                     referrer = 'https://r.example/', origin = 'https://o.example'",
+                [],
+            )
+            .unwrap();
+        });
+        f.send(Command::Watching(Some("p".into())));
+        let now = unix_now();
+        f.send(Command::Schedule(programme(now, now + 1)));
+        assert_eq!(started(f.event().await).state, RecState::Recording);
+        assert_eq!(ended(f.event().await).state, RecState::Done);
+        let args = f.args();
+        let expected = "-loglevel\nerror\n\
+            -user_agent\nExample/1.0\n-referer\nhttps://r.example/\n\
+            -headers\nOrigin: https://o.example\r\n\n\
+            -i\nhttp://s.example/1.m3u8?token=t\n-c\n";
+        assert!(args.contains(expected), "{args:?}");
     }
 
     #[tokio::test]

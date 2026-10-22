@@ -4,7 +4,9 @@
 //! An entry runs from `#EXTINF` to the next non-empty line that is not a
 //! `#` line, its URL. Other `#` lines and blank lines in between are
 //! skipped; a URL with no `#EXTINF` is kept, named after its last path
-//! segment; an `#EXTINF` with no URL is skipped and counted.
+//! segment; an `#EXTINF` with no URL is skipped and counted. Stream
+//! headers come from `#EXTVLCOPT` lines before the URL and a Kodi-style
+//! `|` suffix on it (M3U ticket 03).
 
 use std::io::{BufRead, BufReader, Read};
 
@@ -20,7 +22,76 @@ pub struct Entry {
     pub group: Option<String>,
     /// `tvg-chno` or `tvg-ch`, when a number.
     pub chno: Option<i64>,
+    /// Without its `|` suffix.
     pub url: String,
+    pub headers: Headers,
+}
+
+/// The HTTP headers a stream asks for (M3U ticket 03). Values never hold
+/// a control character, so none can end a header early.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Headers {
+    pub user_agent: Option<String>,
+    pub referrer: Option<String>,
+    pub origin: Option<String>,
+}
+
+impl Headers {
+    /// Sets `key`'s header, `#EXTVLCOPT` (`http-user-agent`) or pipe
+    /// suffix (`User-Agent`) style, unless set already. Other keys and
+    /// empty values are ignored.
+    fn set(&mut self, key: &str, value: &str) {
+        let slot = match key.trim().to_ascii_lowercase().as_str() {
+            "http-user-agent" | "user-agent" => &mut self.user_agent,
+            "http-referrer" | "referer" => &mut self.referrer,
+            "http-origin" | "origin" => &mut self.origin,
+            _ => return,
+        };
+        if value.chars().any(char::is_control) {
+            return;
+        }
+        let value = value.trim();
+        if !value.is_empty() {
+            slot.get_or_insert_with(|| value.to_owned());
+        }
+    }
+}
+
+/// `url` without its Kodi-style `|User-Agent=...&Referer=...` suffix, the
+/// suffix's percent-encoded values added to `headers`.
+fn split_url(url: &str, headers: &mut Headers) -> String {
+    let Some((url, suffix)) = url.split_once('|') else {
+        return url.to_owned();
+    };
+    for pair in suffix.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            headers.set(key, &percent_decode(value));
+        }
+    }
+    url.trim_end().to_owned()
+}
+
+/// `%XX` escapes decoded; a `%` not followed by two hex digits is kept.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = b
+            .get(i + 1..i + 3)
+            .and_then(|h| u8::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok());
+        match (b[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Why reading stopped: `each` failed, or the body is not a channel list.
@@ -43,6 +114,8 @@ pub fn read<E>(
     let mut body = BufReader::with_capacity(64 * 1024, body);
     let (mut line, mut first, mut header) = (Vec::new(), true, false);
     let mut pending: Option<Entry> = None;
+    // `#EXTVLCOPT` headers since the last `#EXTINF` or URL.
+    let mut headers = Headers::default();
     let mut skipped = 0;
     loop {
         line.clear();
@@ -67,6 +140,11 @@ pub fn read<E>(
         if let Some(rest) = strip_ci(text, "#EXTINF:") {
             skipped += usize::from(pending.is_some());
             pending = Some(extinf(rest));
+            headers = Headers::default();
+        } else if let Some(opt) = strip_ci(text, "#EXTVLCOPT:") {
+            if let Some((key, value)) = opt.split_once('=') {
+                headers.set(key, value);
+            }
         } else if strip_ci(text, "#EXT-X-TARGETDURATION").is_some()
             || strip_ci(text, "#EXT-X-STREAM-INF").is_some()
         {
@@ -74,14 +152,14 @@ pub fn read<E>(
                 "this is a stream, not a channel list".into(),
             ));
         } else if !text.starts_with('#') {
+            let mut headers = std::mem::take(&mut headers);
+            let url = split_url(text, &mut headers);
             let entry = match pending.take() {
-                Some(e) => Entry {
-                    url: text.to_owned(),
-                    ..e
-                },
+                Some(e) => Entry { url, headers, ..e },
                 None => Entry {
-                    title: last_segment(text).to_owned(),
-                    url: text.to_owned(),
+                    title: last_segment(&url).to_owned(),
+                    url,
+                    headers,
                     ..Entry::default()
                 },
             };
@@ -289,13 +367,21 @@ mod tests {
                     group: Some("News".into()),
                     chno: None,
                     url: "http://s.example/1.ts".into(),
+                    headers: Headers {
+                        user_agent: Some("Example/1.0".into()),
+                        ..Headers::default()
+                    },
                 },
                 Entry {
                     title: "Kestrel's Own".into(),
                     tvg_id: Some("kestrel.uk".into()),
                     group: Some("Drama".into()),
                     chno: Some(12),
-                    url: "http://s.example/2.ts|User-Agent=Example".into(),
+                    url: "http://s.example/2.ts".into(),
+                    headers: Headers {
+                        user_agent: Some("Example".into()),
+                        ..Headers::default()
+                    },
                     ..Entry::default()
                 },
                 Entry {
@@ -308,6 +394,53 @@ mod tests {
                     url: "rtmp://s.example/3".into(),
                     ..Entry::default()
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn headers_come_from_options_and_the_pipe_suffix() {
+        let body = concat!(
+            "#EXTM3U\n",
+            "#EXTVLCOPT:http-user-agent=Opt/1.0 (X11, Linux)\n",
+            "#EXTINF:-1,One\n",
+            "#EXTVLCOPT:http-referrer=https://r.example/\n",
+            "#EXTVLCOPT:HTTP-ORIGIN=https://o.example\n",
+            "#EXTVLCOPT:network-caching=1000\n",
+            "#KODIPROP:inputstream=x\n",
+            "http://s/1.m3u8|User-Agent=Pipe%2F2.0&Referer=https://p.example/&Cookie=c=1\n",
+            "#EXTINF:-1,Two\n",
+            "http://s/2.ts | user-agent=Two%20Agent&origin=https%3A%2F%2Ftwo.example&referer=%0d%0aX: y\n",
+            "#EXTINF:-1,Three\n",
+            "http://s/3.ts\n",
+        );
+        let (got, _) = entries(body).unwrap();
+        let shown: Vec<(&str, &Headers)> =
+            got.iter().map(|e| (e.url.as_str(), &e.headers)).collect();
+        let h = |ua: Option<&str>, referrer: Option<&str>, origin: Option<&str>| Headers {
+            user_agent: ua.map(Into::into),
+            referrer: referrer.map(Into::into),
+            origin: origin.map(Into::into),
+        };
+        assert_eq!(
+            shown,
+            [
+                // An option above the `#EXTINF` is not the entry's; one
+                // below wins over the suffix.
+                (
+                    "http://s/1.m3u8",
+                    &h(
+                        Some("Pipe/2.0"),
+                        Some("https://r.example/"),
+                        Some("https://o.example")
+                    )
+                ),
+                // A decoded CR LF drops the value.
+                (
+                    "http://s/2.ts",
+                    &h(Some("Two Agent"), None, Some("https://two.example"))
+                ),
+                ("http://s/3.ts", &Headers::default()),
             ]
         );
     }

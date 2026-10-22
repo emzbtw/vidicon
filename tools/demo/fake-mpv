@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Fake mpv for screenshots: serves the IPC socket, plays nothing.
+# Fake mpv for screenshots: serves the IPC socket, plays nothing. With
+# FAKE_MPV_LOG set, appends each `loadfile` to that file.
 import json, os, socket, sys, time
 path = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--input-ipc-server="))
 props = {"pause": False, "mute": False, "fullscreen": False}
@@ -11,6 +12,19 @@ conn, _ = srv.accept()
 f = conn.makefile("rw")
 def send(o):
     f.write(json.dumps(o) + "\n"); f.flush()
+def options(s):
+    # `key=value,...`, a value `%<bytes>%<value>` when quoted (M3U ticket 03).
+    out = {}
+    while s:
+        key, s = s.split("=", 1)
+        if s.startswith("%"):
+            n, s = s[1:].split("%", 1)
+            b = s.encode()
+            value, s = b[:int(n)].decode(), b[int(n):].decode().removeprefix(",")
+        else:
+            value, _, s = s.partition(",")
+        out[key] = value
+    return out
 entry = 0
 loaded = time.time()
 start = 720
@@ -36,8 +50,11 @@ for line in f:
     elif c[0] == "loadfile":
         entry += 1
         loaded = time.time()
-        opts = dict(o.split("=", 1) for o in c[4].split(",")) if len(c) > 4 else {}
+        opts = options(c[4]) if len(c) > 4 else {}
         start = float(opts.get("start", 720))
+        if os.environ.get("FAKE_MPV_LOG"):
+            with open(os.environ["FAKE_MPV_LOG"], "a") as log:
+                log.write(json.dumps(c) + "\n")
         send({"request_id": rid, "error": "success", "data": {"playlist_entry_id": entry}})
     elif c[0] == "quit":
         break

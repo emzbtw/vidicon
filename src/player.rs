@@ -12,6 +12,7 @@
 //! A live channel that drops is played again a few times before the app
 //! gives up (stream recovery ticket 02, SPEC 9.3).
 
+use crate::m3u::Headers;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -247,8 +248,8 @@ pub struct Player {
     events: mpsc::UnboundedSender<Event>,
     running: Option<Running>,
     next_request: i64,
-    /// The URL and title last loaded, for going live.
-    current: Option<(String, String)>,
+    /// The URL, headers and title last loaded, for going live.
+    current: Option<(String, Option<Headers>, String)>,
     /// The latest `loadfile`'s request id: [`Signal`]s about older ones are
     /// stale.
     load: i64,
@@ -353,6 +354,32 @@ fn stream_kind(url: &str) -> &'static str {
     }
 }
 
+/// `loadfile`'s options: where to start, and an M3U channel's headers
+/// (M3U ticket 03). mpv sets them for that file alone, so they never
+/// reach the next. A header value is written `%<bytes>%<value>`, which
+/// mpv takes as is, commas included; the `Origin` line, a list item in
+/// `http-header-fields`, has its commas escaped too.
+fn loadfile_options(start: Option<f64>, headers: Option<&Headers>) -> Option<String> {
+    let quoted = |v: &str| format!("%{}%{v}", v.len());
+    let mut options = Vec::new();
+    if let Some(s) = start {
+        options.push(format!("start={s}"));
+    }
+    if let Some(h) = headers {
+        if let Some(agent) = &h.user_agent {
+            options.push(format!("user-agent={}", quoted(agent)));
+        }
+        if let Some(referrer) = &h.referrer {
+            options.push(format!("referrer={}", quoted(referrer)));
+        }
+        if let Some(origin) = &h.origin {
+            let field = format!("Origin: {}", origin.replace(',', "\\,"));
+            options.push(format!("http-header-fields={}", quoted(&field)));
+        }
+    }
+    (!options.is_empty()).then(|| options.join(","))
+}
+
 const ENTRIES_KEPT: usize = 8;
 const TITLE: &str = "--title=${?media-title:${media-title}}${!media-title:No file} - mpv";
 
@@ -421,7 +448,7 @@ impl Player {
                     None => {
                         log::info!("live channel dropped ({reason}); gave up after {sent} retries");
                         self.reconnect = None;
-                        let title = self.current.as_ref().map_or("", |(_, t)| t).to_string();
+                        let title = self.current.as_ref().map_or("", |(_, _, t)| t).to_string();
                         let _ = self.events.send(Event::Failed { title, reason });
                     }
                 }
@@ -443,11 +470,11 @@ impl Player {
                     .as_ref()
                     .is_some_and(|r| r.titles.lock().unwrap().alive);
                 let current = self.current.clone().filter(|_| alive);
-                let Some((url, title)) = current else {
+                let Some((url, headers, title)) = current else {
                     // mpv was closed: not a drop.
                     return self.cancel_reconnect();
                 };
-                if let Err(e) = self.reload(&url, &title).await {
+                if let Err(e) = self.reload(&url, headers.as_ref(), &title).await {
                     log::error!("{e}");
                     self.cancel_reconnect();
                 }
@@ -465,17 +492,19 @@ impl Player {
     /// [`Player::play_at`] from the start.
     #[cfg(test)]
     pub async fn play(&mut self, url: &str, title: &str, pressed: Instant) -> Result<(), String> {
-        self.play_at(url, title, None, pressed).await
+        self.play_at(url, None, title, None, pressed).await
     }
 
     /// Plays `url`, spawning mpv first if it is not running, from `start`
     /// seconds in when given: a movie or episode resuming (VOD ticket 07).
+    /// `headers` are an M3U channel's (M3U ticket 03), for this `url` only.
     /// `title` becomes mpv's media title before the URL is loaded, so the
     /// URL (which carries credentials) never becomes the window title.
     /// `pressed` is when the user asked, for the SPEC 10 switch budget.
     pub async fn play_at(
         &mut self,
         url: &str,
+        headers: Option<&Headers>,
         title: &str,
         start: Option<f64>,
         pressed: Instant,
@@ -496,7 +525,7 @@ impl Player {
             "{}\n",
             json!({ "command": ["set_property", "force-media-title", title] })
         );
-        msg.push_str(&self.loadfile(url, title, false, start));
+        msg.push_str(&self.loadfile(url, headers, title, false, start));
         self.write(&msg).await?;
         log::debug!(
             "loadfile sent {} ms after keypress",
@@ -506,18 +535,31 @@ impl Player {
     }
 
     /// The `loadfile` line for `url`, noting its title for errors and
-    /// resetting [`Behind`]. Needs mpv running.
-    fn loadfile(&mut self, url: &str, title: &str, unpause: bool, start: Option<f64>) -> String {
+    /// resetting [`Behind`]. Needs mpv running. A URL with `headers` is an
+    /// M3U channel's, so live whatever its path.
+    fn loadfile(
+        &mut self,
+        url: &str,
+        headers: Option<&Headers>,
+        title: &str,
+        unpause: bool,
+        start: Option<f64>,
+    ) -> String {
         let request = self.next_request;
         self.next_request += 1;
-        self.current = Some((url.to_string(), title.to_string()));
+        self.current = Some((url.to_string(), headers.cloned(), title.to_string()));
+        let kind = if headers.is_some() {
+            "live"
+        } else {
+            stream_kind(url)
+        };
         self.load = request;
         let running = self.running.as_ref().unwrap();
         {
             let mut t = running.titles.lock().unwrap();
             t.by_request.insert(request, title.to_string());
             t.last = title.to_string();
-            t.loaded = Some((Instant::now(), stream_kind(url)));
+            t.loaded = Some((Instant::now(), kind));
             t.load = request;
             t.played = false;
             t.seeking = false;
@@ -527,8 +569,8 @@ impl Player {
         behind.reload(unpause, Instant::now());
         let _ = self.events.send(Event::Behind(*behind));
         // mpv 0.38 and later: the index, then the options (SPEC 6.1).
-        let command = match start {
-            Some(s) => json!(["loadfile", url, "replace", -1, format!("start={s}")]),
+        let command = match loadfile_options(start, headers) {
+            Some(options) => json!(["loadfile", url, "replace", -1, options]),
             None => json!(["loadfile", url, "replace"]),
         };
         format!("{}\n", json!({ "command": command, "request_id": request }))
@@ -761,19 +803,24 @@ impl Player {
             .lock()
             .unwrap()
             .at(Instant::now());
-        let Some((url, title)) = self
+        let Some((url, headers, title)) = self
             .current
             .clone()
             .filter(|_| reconnecting || !behind.is_zero())
         else {
             return Ok(());
         };
-        self.reload(&url, &title).await
+        self.reload(&url, headers.as_ref(), &title).await
     }
 
     /// Loads `url` again at the live edge, unpaused. Needs mpv running.
-    async fn reload(&mut self, url: &str, title: &str) -> Result<(), String> {
-        let mut msg = self.loadfile(url, title, true, None);
+    async fn reload(
+        &mut self,
+        url: &str,
+        headers: Option<&Headers>,
+        title: &str,
+    ) -> Result<(), String> {
+        let mut msg = self.loadfile(url, headers, title, true, None);
         msg.push_str(&format!(
             "{}\n",
             json!({ "command": ["set_property", "pause", false] })
@@ -1253,7 +1300,13 @@ mod tests {
         next_json(&mut lines).await;
         next_json(&mut lines).await;
         f.player
-            .play_at("http://h/m.mkv", "Quiet Shore", Some(600.0), Instant::now())
+            .play_at(
+                "http://h/m.mkv",
+                None,
+                "Quiet Shore",
+                Some(600.0),
+                Instant::now(),
+            )
             .await
             .unwrap();
         next_json(&mut lines).await;
@@ -2015,6 +2068,71 @@ mod tests {
             wait_reconnect(&mut f.events).await,
             Event::Reconnecting(true)
         );
+    }
+
+    /// M3U ticket 03: an M3U channel's headers go with its `loadfile` and
+    /// its retries, never with the next channel's. It is live whatever its
+    /// URL's path.
+    #[tokio::test]
+    async fn m3u_headers_go_with_their_channel_only() {
+        let mut f = Fake::reconnecting();
+        let (mut lines, mut w) = playing_live(&mut f).await;
+        let headers = Headers {
+            user_agent: Some("Mozilla/5.0 (X11, Linux)".into()),
+            referrer: Some("https://r.example/".into()),
+            origin: Some("https://o.example".into()),
+        };
+        const M3U: &str = "http://s.example/1.m3u8?token=t";
+        f.player
+            .play_at(M3U, Some(&headers), "2 Two", None, Instant::now())
+            .await
+            .unwrap();
+        next_json(&mut lines).await;
+        let options = "user-agent=%24%Mozilla/5.0 (X11, Linux),\
+            referrer=%18%https://r.example/,\
+            http-header-fields=%25%Origin: https://o.example";
+        let m3u = json!(["loadfile", M3U, "replace", -1, options]);
+        assert_eq!(load(&mut lines, &mut w, 2).await, m3u);
+        send(&mut w, RESTART).await;
+        send(&mut w, &end_file("eof", 2)).await;
+        f.tick().await;
+        assert_eq!(
+            wait_reconnect(&mut f.events).await,
+            Event::Reconnecting(true)
+        );
+        f.tick().await;
+        assert_eq!(load(&mut lines, &mut w, 3).await, m3u);
+        next_json(&mut lines).await;
+        f.player.play(LIVE, "1 One", Instant::now()).await.unwrap();
+        next_json(&mut lines).await;
+        assert_eq!(
+            load(&mut lines, &mut w, 4).await,
+            json!(["loadfile", LIVE, "replace"])
+        );
+    }
+
+    #[test]
+    fn loadfile_options_quote_header_values() {
+        let only = |h: Headers| loadfile_options(None, Some(&h)).unwrap();
+        let agent = Headers {
+            user_agent: Some("A, b=c".into()),
+            ..Headers::default()
+        };
+        assert_eq!(only(agent), "user-agent=%6%A, b=c");
+        let origin = Headers {
+            origin: Some("https://o.example,x".into()),
+            ..Headers::default()
+        };
+        assert_eq!(
+            only(origin),
+            r"http-header-fields=%28%Origin: https://o.example\,x"
+        );
+        assert_eq!(
+            loadfile_options(Some(600.0), Some(&Headers::default())),
+            Some("start=600".into())
+        );
+        assert_eq!(loadfile_options(None, Some(&Headers::default())), None);
+        assert_eq!(loadfile_options(None, None), None);
     }
 
     #[tokio::test]

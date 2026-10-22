@@ -535,6 +535,7 @@ mod tests {
                 archive_days: 0,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }
@@ -590,6 +591,7 @@ mod tests {
                 archive_days: 0,
                 url: None,
                 tvg_name: None,
+                headers: None,
             };
             store::insert_channel(&tx, "p", &c).unwrap();
         }

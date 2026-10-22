@@ -5,6 +5,7 @@ use crate::epg_sources;
 use crate::import;
 use crate::info;
 use crate::logos;
+use crate::m3u::Headers;
 use crate::player::{Behind, Control, Event, Launch, Player, Remote};
 use crate::recorder::{self, Recorder, recording_name, reserve_recording};
 use crate::refresh::{self, AccountInfo, Refresher, Request, Stage, StageState, Stages, Update};
@@ -6758,6 +6759,7 @@ impl Screen {
     fn send_play(
         &mut self,
         url: String,
+        headers: Option<Headers>,
         title: String,
         start: Option<f64>,
         pressed: Instant,
@@ -6767,6 +6769,7 @@ impl Screen {
         let _ = self.player_tx.send(PlayerCommand::Play(PlayRequest {
             id: self.plays,
             url,
+            headers,
             title,
             start,
             pressed,
@@ -6804,7 +6807,7 @@ impl Screen {
         let watching = recorder::Command::Watching((!local).then(|| provider_id.clone()));
         let _ = self.recorder_tx.send(watching);
         let start = start.filter(|s| *s > 0).map(|s| s as f64);
-        let play = self.send_play(target, title, start, pressed);
+        let play = self.send_play(target, None, title, start, pressed);
         // Recently played lists an episode's series (VOD ticket 11).
         let (kind, stream_id) = match item {
             Watchable::Movie(id) => (Kind::Movie, id),
@@ -6911,10 +6914,15 @@ impl Screen {
         }
         let source = &self.sources[self.active];
         let (url, catch_up) = match programme {
-            None => (
-                source.client.stream_url(row.stream_id, &row.extension),
-                None,
-            ),
+            None => {
+                let stream = store::channel_stream(&self.conn, &source.provider.id, row.stream_id)
+                    .map_err(|e| format!("reading channel: {e}"))
+                    .and_then(|s| {
+                        s.ok_or_else(|| format!("{} is no longer in the provider's list", row.name))
+                    })
+                    .and_then(|s| source.client.live_stream(row.stream_id, &s));
+                (stream, None)
+            }
             Some(p) => {
                 let offset = match &source.info {
                     None => return self.set_error("Catch-up waits for the account check"),
@@ -6928,10 +6936,10 @@ impl Screen {
                 let after = self.record_after;
                 let (start, minutes, from) =
                     xtream::archive_request(p.start, p.stop, offset, after);
-                let url =
-                    source
-                        .client
-                        .timeshift_url(row.stream_id, &start, minutes, &row.extension);
+                let url = source
+                    .client
+                    .timeshift_url(row.stream_id, &start, minutes, &row.extension)
+                    .map(|url| (url.to_string(), None));
                 let catch_up = CatchUp {
                     programme: p,
                     from,
@@ -6943,13 +6951,18 @@ impl Screen {
         let replayed = catch_up.as_ref().map(|c| c.programme.title.as_str());
         let title = media_title(row.num, &row.name, replayed);
         match url {
-            Ok(url) => {
-                log::info!("play {title}: {}", xtream::redact(url.as_str()));
+            Ok((url, headers)) => {
+                // An M3U stream URL can hold a token: logged by its host.
+                let shown = match headers {
+                    Some(_) => config::source_label(&url),
+                    None => xtream::redact(&url),
+                };
+                log::info!("play {title}: {shown}");
                 let provider_id = self.provider().id.clone();
                 let watching = recorder::Command::Watching(Some(provider_id.clone()));
                 let _ = self.recorder_tx.send(watching);
                 self.keep_progress(false);
-                self.send_play(url.to_string(), title, None, pressed);
+                self.send_play(url, headers, title, None, pressed);
                 let _ = self.write_tx.send(Write::Played {
                     provider_id: provider_id.clone(),
                     kind: Kind::Live,
@@ -10521,7 +10534,7 @@ impl Screen {
         log::info!("play recording {file}");
         let _ = self.recorder_tx.send(recorder::Command::Watching(None));
         self.keep_progress(false);
-        self.send_play(file, title.clone(), None, Instant::now());
+        self.send_play(file, None, title.clone(), None, Instant::now());
         self.now_playing = None;
         self.movie = None;
         self.set_status(&format!("Playing {title}"));
@@ -10963,6 +10976,8 @@ struct PlayRequest {
     /// Counts the plays sent, for [`Event::Handed`].
     id: u64,
     url: String,
+    /// An M3U channel's (M3U ticket 03).
+    headers: Option<Headers>,
     title: String,
     /// Seconds in to start from: a movie or episode resuming.
     start: Option<f64>,
@@ -11163,7 +11178,13 @@ pub fn run(
                 PlayerCommand::Play(req) => {
                     let _ = event_tx.send(Event::Handed(req.id));
                     let played = player
-                        .play_at(&req.url, &req.title, req.start, req.pressed)
+                        .play_at(
+                            &req.url,
+                            req.headers.as_ref(),
+                            &req.title,
+                            req.start,
+                            req.pressed,
+                        )
                         .await;
                     if let Err(reason) = played {
                         let _ = event_tx.send(Event::Failed {

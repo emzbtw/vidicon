@@ -592,6 +592,7 @@ pub fn write_channels(
             archive_days: s.archive_days(),
             url: None,
             tvg_name: None,
+            headers: None,
         };
         store::insert_channel(&tx, provider_id, &row).map(|()| true)
     })
@@ -619,8 +620,7 @@ pub fn write_playlist(
     store::begin_playlist_import(&tx, provider_id, provider_name).map_err(db)?;
     let mut ord = 0;
     let skipped = m3u::read(body, |e: m3u::Entry| {
-        // The URL without a Kodi-style `|` suffix of headers.
-        let url = e.url.split('|').next().unwrap_or(&e.url);
+        let url = e.url.as_str();
         let key = e
             .tvg_id
             .as_deref()
@@ -640,8 +640,9 @@ pub fn write_playlist(
             icon_url: e.logo.as_deref(),
             extension: "",
             archive_days: 0,
-            url: Some(&e.url),
+            url: Some(url),
             tvg_name: e.tvg_name.as_deref(),
+            headers: Some(&e.headers),
         };
         let hashes = (
             stable_hash(&[key.as_bytes()]),
@@ -2268,7 +2269,24 @@ mod tests {
                 ("Kestrel", "Drama")
             ]
         );
-        assert_eq!(rows[3].3, "http://s.example/2.ts|User-Agent=Example");
+        assert_eq!(rows[3].3, "http://s.example/2.ts");
+        // Headers from an option and from a `|` suffix (M3U ticket 03).
+        let agents: Vec<Option<String>> = rows
+            .iter()
+            .map(|(id, ..)| {
+                let stream = store::channel_stream(&conn, "p", *id).unwrap().unwrap();
+                stream.headers.user_agent
+            })
+            .collect();
+        assert_eq!(
+            agents,
+            [
+                Some("Example/1.0".into()),
+                None,
+                None,
+                Some("Example".into())
+            ]
+        );
         let cats: Vec<(String, i64)> = conn
             .prepare("SELECT name, sort FROM category WHERE provider_id = 'p' ORDER BY sort")
             .unwrap()

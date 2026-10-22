@@ -5,7 +5,7 @@
 are added after the screenshot set, for the performance pass (docs/perf/)."""
 import base64, gzip, json, os, random, struct, subprocess, sys, tempfile, threading, time, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 from xml.sax.saxutils import escape
 
 rng = random.Random(12)
@@ -288,6 +288,12 @@ def playlist():
             title += ", London"
         if i == 5:
             url += "?token=" + "".join(random.Random(5).choices("abcdef0123456789", k=1500))
+        # Streams that need headers (M3U ticket 03): by option lines, and by
+        # a Kodi-style `|` suffix. `/live/` refuses them without.
+        if i == 6:
+            url += "?need=" + quote("Demo/1.0 (X11, Linux)")
+        if i == 7:
+            url += "?need=" + quote("DemoPipe/2.0")
         if i % 7 == 3 and s["epg_channel_id"]:
             attrs = f'tvg-id={s["epg_channel_id"]} tvg-chno={s["num"]}'
         else:
@@ -298,7 +304,10 @@ def playlist():
         out.append(f"#EXTINF:-1 {attrs},{title}")
         if i == 4:
             out += ["", "# the backup feed is below"]
-        out.append(url)
+        if i == 6:
+            out += ["#EXTVLCOPT:http-user-agent=Demo/1.0 (X11, Linux)",
+                    "#EXTVLCOPT:http-referrer=https://demo.example/"]
+        out.append(url + ("|User-Agent=DemoPipe%2F2.0&Origin=https%3A%2F%2Fdemo.example" if i == 7 else ""))
         if i == 0:
             # A backup stream under the same `tvg-id`.
             out += [f"#EXTINF:-1 {attrs},{title} (backup)", url + "?backup=1"]
@@ -571,6 +580,10 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(PLAYLIST)
             return
         if u.path.startswith("/live/"):
+            need = parse_qs(u.query).get("need", [None])[0]
+            if need and self.headers.get("User-Agent") != need:
+                self.send_error(403)
+                return
             self.live(u.path.rsplit("/", 1)[-1].split(".")[0])
             return
         if u.path.startswith(("/movie/", "/series/")):

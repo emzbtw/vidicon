@@ -44,7 +44,8 @@ For screenshots in `docs/screenshots/`, which must show invented data only.
 - `fake-mpv`: stands in for mpv. Serves the IPC socket, answers
   `observe_property`, `cycle`, and `time-pos` and `duration` (12 min in
   at the load, or from the `start=` asked, of 1 h 33 min), and `seek`
-  (VOD ticket 07), plays nothing.
+  (VOD ticket 07), plays nothing. With `FAKE_MPV_LOG=<file>` it appends
+  each `loadfile` to that file, to check its options (M3U ticket 03).
 
 The API accepts one invented account, username `demo` and password
 `demo`; any other gets `{"user_info":{"auth":0}}`, as wrong credentials do
@@ -106,7 +107,10 @@ backup stream under the same key, one stream in two groups (`Highlights`
 too), a blank line and a comment inside an entry, unquoted attributes, a
 title with a comma, a URL with a 1.5k-character token, a URL with no
 `#EXTINF`, an `#EXTINF` with no URL (`1 entry skipped`) and an
-`#EXT-X-CREDENTIALS` line. `DEMO_SLOW=playlist:20` and
+`#EXT-X-CREDENTIALS` line. Channels 7 and 8 need headers (M3U ticket
+03): 7 sets a user agent with a comma and a referrer by `#EXTVLCOPT`
+lines, 8 a user agent and an origin by a `|` suffix. `/live/` refuses
+them (403) without that user agent. `DEMO_SLOW=playlist:20` and
 `DEMO_FAIL=playlist:503` work on it.
 
 ```toml
