@@ -19,6 +19,7 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
 - `.scratch/recording/`: recording milestone tickets, same rules.
 - `.scratch/catch-up/`: catch-up milestone tickets, same rules.
 - `.scratch/vod/`: movies and series milestone tickets, same rules.
+- `.scratch/m3u/`: M3U playlists milestone tickets, same rules.
 - `.scratch/stream-recovery/`: stream recovery milestone tickets, same rules.
 - `.scratch/refresh-panel/`, `.scratch/settings/`, `.scratch/onboarding/`,
   `.scratch/epg-sources/`: those milestones' tickets, same rules.

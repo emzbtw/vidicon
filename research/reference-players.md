@@ -616,3 +616,50 @@ For the EPG sources milestone (`docs/milestones/epg-sources.md`).
   without fuzzy scoring, shifts applied at import rather than on display,
   conditional fetches with per-source limits, and remove deleting a
   source's rows in one transaction.
+
+## 7. M3U parsing (researched 2026-10-22)
+
+Read for the M3U milestone, at the same pins as sections 1 to 3.
+
+- **ynoTV**
+  ([m3u-parser.ts](https://github.com/tbeezy/ynotv/blob/be73521c1d0b365444fafbfe09608e0c7733e9d1/packages/local-adapter/src/m3u-parser.ts)):
+  splits the whole body into lines. Attributes are read double-quoted,
+  single-quoted or unquoted, with aliases (`tvg-logo`/`tvg-icon`/`logo`,
+  `group-title`/`group`, `tvg-chno`/`tvg-ch`/`channel-id`). The title is
+  everything after the last comma. Ids are `tvg-id` when unique, else
+  `tvg-id` plus a hash of the URL, else a URL hash alone. Only
+  `http`, `https` and `rtmp` lines count as URLs; other `#` lines are
+  skipped. The playlist is fetched with a VLC user agent unless the source
+  sets one. It pulls an Xtream `stream_id` out of `/live/user/pass/<id>`
+  URLs. Catch-up reads `catchup`, `catchup-days`, `catchup-source` and
+  `tvg-shift`, from each entry or as `#EXTM3U` header defaults
+  ([m3u-catchup.ts](https://github.com/tbeezy/ynotv/blob/be73521c1d0b365444fafbfe09608e0c7733e9d1/packages/local-adapter/src/m3u-catchup.ts)):
+  `{utc}`/`{start}`/`{duration}`-style templates, or append, shift and
+  flussonic URL forms when there is no template.
+- **open-tv**
+  ([m3u.rs](https://github.com/Fredolx/open-tv/blob/1bfa78a181166025a6b977d783f895e819ff720f/src-tauri/src/m3u.rs)):
+  downloads to a temp file, then a `BufReader` line loop. An entry is an
+  `#EXTINF` line plus the last non-empty line before the next one, so a
+  plain `#` comment or a blank-line run in between breaks it. The name is
+  `tvg-name`, then the title or `tvg-id` (a per-source option picks
+  which). Each `#EXTVLCOPT` sets origin, referrer or user agent. `.mp4`
+  and `.mkv` URLs count as movies. A per-source user agent is used for the
+  download. Both parse-error issues are lists it should have read:
+  [#67](https://github.com/Fredolx/open-tv/issues/67) (`#EXTVLCOPT` lines
+  and attributes in an unusual order) and
+  [#78](https://github.com/Fredolx/open-tv/issues/78) (comment lines and
+  blank lines between entries); a count of bad entries fails the whole
+  read. #78's `url-tvg` names four `.xml.xz` feeds.
+- **IPTVnator**
+  ([m3u-playlist-module.md](https://github.com/4gray/iptvnator/blob/bcc6186c8830a6d76c8a563b49033935d62b2984/docs/architecture/m3u-playlist-module.md#L146-L158)):
+  any non-empty, non-`#` line after `#EXTINF` is the URL, with no
+  validation; a 2084-character limit had rejected long Pluto-style token
+  URLs and collapsed a whole list into one channel
+  ([#1189](https://github.com/4gray/iptvnator/issues/1189)). URLs are cut
+  at the first `|` and `|User-Agent=`/`|Referer=` become headers.
+  `#KODIPROP` lines above an `#EXTINF` attach to that entry. URL sources
+  take an optional user agent, kept across refreshes.
+- **Taken for Vidicon:** tolerant attribute reading with ynoTV's aliases,
+  any non-`#` line as the URL, `#EXTVLCOPT` and pipe headers, a bad entry
+  skipped rather than failing the read, an optional per-provider user
+  agent, and xz guide feeds. Catch-up waits on the probe's counts.

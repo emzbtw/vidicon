@@ -14,6 +14,11 @@ provider with a switcher.
   XMLTV sources (URLs or files), ordered with its own `xmltv.php` and
   matched to its channels (`docs/milestones/epg-sources.md`). Channels and
   streams still come only from Xtream.
+- **Amended 2026-10-22:** a provider can also be an M3U playlist, by URL
+  or path (`type = "m3u"`), its entries all live channels, its guide
+  from the playlist's `url-tvg` feeds and external sources
+  (`docs/milestones/m3u.md`). Catch-up, VOD and the account stay
+  Xtream-only. Stalker portals are still out.
 
 ## Why
 

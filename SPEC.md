@@ -68,7 +68,8 @@ look poor and slow down with large provider lists.
   form and setup screen over `credentials.toml`
   (`docs/milestones/onboarding.md`); external EPG sources
   (`docs/milestones/epg-sources.md`).
-- M3U sources.
+- M3U playlists as a second source type, by URL or path, live channels
+  only: `docs/milestones/m3u.md` (planned 2026-10-22).
 
 ## 3. Architecture
 
