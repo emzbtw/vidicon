@@ -998,7 +998,9 @@ pub fn add_provider(path: &Path, provider: &Provider) -> Result<Vec<Provider>, S
     write_credentials(path, |doc, text| {
         let mut table = toml_edit::Table::new();
         for (key, value) in provider_values(provider) {
-            table[key] = toml_edit::value(value);
+            if let Some(value) = value {
+                table[key] = toml_edit::value(value);
+            }
         }
         // At the very end, after any comments closing the file, one blank
         // line before it.
@@ -1027,9 +1029,10 @@ pub fn add_provider(path: &Path, provider: &Provider) -> Result<Vec<Provider>, S
 }
 
 /// Sets the name, URL, username and password of the provider whose id is
-/// `provider.id` (onboarding ticket 02), each value keeping its spacing and
-/// trailing comment, the rest of the file as it was. Returns the providers
-/// as saved.
+/// `provider.id` (onboarding ticket 02), or an M3U one's name, URL and
+/// user agent (M3U ticket 06, a blank one removed), each value keeping
+/// its spacing and trailing comment, the rest of the file as it was.
+/// Returns the providers as saved.
 pub fn edit_provider(path: &Path, provider: &Provider) -> Result<Vec<Provider>, String> {
     write_credentials(path, |doc, _| {
         let table = provider_tables(doc, path)?
@@ -1037,6 +1040,10 @@ pub fn edit_provider(path: &Path, provider: &Provider) -> Result<Vec<Provider>, 
             .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(&provider.id))
             .ok_or_else(|| format!("{} has no provider {}", path.display(), provider.id))?;
         for (key, value) in provider_values(provider).into_iter().skip(1) {
+            let Some(value) = value else {
+                table.remove(key);
+                continue;
+            };
             match table.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
                 Some(old) => {
                     let decor = old.decor().clone();
@@ -1083,15 +1090,56 @@ pub fn remove_provider(path: &Path, id: &str) -> Result<Vec<Provider>, String> {
     })
 }
 
-/// The values of a provider's table, in the order they are written.
-fn provider_values(p: &Provider) -> [(&'static str, &str); 5] {
-    [
-        ("id", &p.id),
-        ("name", &p.name),
-        ("url", &p.url),
-        ("username", &p.username),
-        ("password", &p.password),
-    ]
+/// The values of a provider's table, in the order they are written; an
+/// M3U one's `type` and `user_agent` in place of the login (M3U ticket
+/// 06). `None` is a key left out.
+fn provider_values(p: &Provider) -> Vec<(&'static str, Option<&str>)> {
+    let (id, name, url) = (
+        Some(p.id.as_str()),
+        Some(p.name.as_str()),
+        Some(p.url.as_str()),
+    );
+    match p.source {
+        Source::Xtream => vec![
+            ("id", id),
+            ("name", name),
+            ("url", url),
+            ("username", Some(&p.username)),
+            ("password", Some(&p.password)),
+        ],
+        Source::M3u => vec![
+            ("id", id),
+            ("name", name),
+            ("type", Some("m3u")),
+            ("url", url),
+            ("user_agent", p.user_agent.as_deref()),
+        ],
+    }
+}
+
+/// An Xtream panel's playlist URL, `.../get.php?username=...&password=...`
+/// (M3U ticket 06): its origin, username and password, which the providers
+/// form offers to add as an Xtream provider instead.
+pub fn xtream_playlist(text: &str) -> Option<(String, String, String)> {
+    let url = reqwest::Url::parse(text.trim()).ok()?;
+    let php = url
+        .path_segments()?
+        .next_back()
+        .is_some_and(|s| s.eq_ignore_ascii_case("get.php"));
+    if !php || !matches!(url.scheme(), "http" | "https") || !url.has_host() {
+        return None;
+    }
+    let query = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+            .filter(|v| !v.is_empty())
+    };
+    Some((
+        url.origin().ascii_serialization(),
+        query("username")?,
+        query("password")?,
+    ))
 }
 
 fn provider_tables<'a>(
@@ -2216,6 +2264,79 @@ mpv_path = \"/opt/mpv\"      # a newer build
         let err = edit_provider(&file, &added("gone")).unwrap_err();
         assert!(err.contains("no provider gone"), "{err}");
         assert_eq!(fs::read_to_string(&file).unwrap(), want);
+    }
+
+    /// M3U ticket 06: an M3U provider is written with its type and user
+    /// agent and no login; an edit sets them in place and drops a blank
+    /// user agent.
+    #[test]
+    fn an_m3u_provider_is_written_with_its_type() {
+        let (_root, file) = setup(0o700, 0o600);
+        fs::write(&file, provider_toml("main")).unwrap();
+        let lists = Provider {
+            id: "lists".into(),
+            name: "Public lists".into(),
+            url: "https://lists.example.net/tv.m3u?token=tok-9x".into(),
+            username: String::new(),
+            password: String::new(),
+            epg: Vec::new(),
+            source: Source::M3u,
+            user_agent: Some("Example/1.0".into()),
+        };
+        let providers = add_provider(&file, &lists).unwrap();
+        assert_eq!(providers[1].source, Source::M3u);
+        let m3u = "[[provider]]\nid = \"lists\"\nname = \"Public lists\"\ntype = \"m3u\"\nurl = \"https://lists.example.net/tv.m3u?token=tok-9x\"\nuser_agent = \"Example/1.0\"\n";
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("{}\n{m3u}", provider_toml("main"))
+        );
+
+        let edited = Provider {
+            url: "/srv/tv/lists.m3u".into(),
+            user_agent: None,
+            ..lists
+        };
+        edit_provider(&file, &edited).unwrap();
+        let want = m3u
+            .replace(
+                "https://lists.example.net/tv.m3u?token=tok-9x",
+                "/srv/tv/lists.m3u",
+            )
+            .replace("user_agent = \"Example/1.0\"\n", "");
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("{}\n{want}", provider_toml("main"))
+        );
+    }
+
+    /// M3U ticket 06: a panel's `get.php` link gives its origin and login;
+    /// anything else is no Xtream playlist.
+    #[test]
+    fn an_xtream_playlist_url_gives_its_login() {
+        assert_eq!(
+            xtream_playlist(
+                " http://panel.example.net:8080/get.php?username=demo&password=s%40cret&type=m3u_plus&output=ts "
+            ),
+            Some((
+                "http://panel.example.net:8080".into(),
+                "demo".into(),
+                "s@cret".into()
+            ))
+        );
+        assert_eq!(
+            xtream_playlist("https://panel.example.net/GET.PHP?password=p&username=u"),
+            Some(("https://panel.example.net".into(), "u".into(), "p".into()))
+        );
+        for no in [
+            "https://lists.example.net/tv.m3u?username=u&password=p",
+            "http://panel.example.net/get.php?username=u",
+            "http://panel.example.net/get.php?username=&password=p",
+            "http://panel.example.net/get.php",
+            "/srv/get.php",
+            "ftp://panel.example.net/get.php?username=u&password=p",
+        ] {
+            assert_eq!(xtream_playlist(no), None, "{no}");
+        }
     }
 
     #[test]

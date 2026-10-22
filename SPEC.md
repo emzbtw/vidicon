@@ -245,6 +245,26 @@ user_agent = "Example/1.0"      # optional
   its note. The provider starts at once: its refresh scheduler runs, the
   recorder, guide tables, info and logos use its client, and it is in
   the switcher.
+- **An M3U provider in the form** (M3U ticket 06): the form's type,
+  Xtream or M3U, is chosen when adding and fixed once saved.
+  An M3U one's playlist is an `http(s)` URL or an absolute path to a
+  file that can be read, checked on entry without fetching and kept as
+  typed; its user agent is optional. Before saving, the playlist is
+  fetched once on the new provider's client, or read from its path, and
+  read through without storing anything: one the import refuses (7.1:
+  no `#EXTM3U`, an HLS stream, no channels) is refused (`The playlist
+  was refused: <why>`), one not fetched (no answer, an HTTP error, a
+  cut download, a file that cannot be opened) warns with `Save anyway`.
+  Its first refresh then fetches it again. Saved, its table has `type =
+  "m3u"`, `url` and any `user_agent`, never a `username` or `password`;
+  an edit sets them in place, a cleared user agent removing the key, and
+  fetches only when the URL or user agent changed. A playlist URL that
+  is an Xtream panel's (`get.php` with a non-empty `username` and
+  `password` in its query) shows `Add as Xtream instead`, before the
+  check and after it, as a panel can refuse `get.php` while its API
+  works (6.4). It switches the form to Xtream with the URL's origin,
+  username and password, the link and the user agent dropped, and
+  `Check and save` then checks the account as above.
 - Settings › Providers edits and removes a provider (onboarding ticket
   02, 8.2). Editing changes its name, URL, username and password; the id
   never changes, and a new URL or username keeps all its data, the next
@@ -1697,7 +1717,8 @@ branch).
   folder (`recordings_dir`), ffmpeg (`ffmpeg_path`), Start early by
   (`record_before`) and Run late by (`record_after`), each a stepper
   with − and + either side of `2 min`. Downloads: Downloads folder
-  (`downloads_dir`). A text field shows its value on the right; Enter
+  (`downloads_dir`), shown with an M3U provider active too, as it is one
+  setting for every provider's movies and series (M3U ticket 06). A text field shows its value on the right; Enter
   opens a box under it holding the value (the arguments as a shell
   line), typed into as in search, Ctrl v pasting (one line,
   newlines as spaces) and Ctrl u clearing it. Enter checks and
@@ -1707,17 +1728,26 @@ branch).
   a stepper, each step saved. The hint line says the keys for what is
   selected. Providers (onboarding ticket 01): each provider by name, its
   id and last account check under it (`demo · Expires 21 Mar 2027 · 2
-  connections`), then `Add provider…`, whose Enter opens the form in the
-  section's place: Name, Server URL, Username and Password, text fields
-  as above whose Enter keeps the value rather than saving it, then
-  `Check and save`. The password shows as dots, with a `Show` / `Hide`
-  button; Ctrl r does the same. Enter on `Check and save` says what is
+  connections`; an M3U one's `lists · M3U · lists.example.net`,
+  M3U ticket 06), then `Add provider…`, whose Enter opens the form in the
+  section's place: a `Type` switch, `Xtream` / `M3U`, whose
+  Enter flips it and clears the URL; for Xtream Name, Server URL,
+  Username and Password, for M3U Name, Playlist and User agent, text
+  fields as above whose Enter keeps the value rather than saving it,
+  then `Check and save` (`Fetching the playlist…` for M3U). The playlist
+  URL's query shows as `?•••` with a `Show` / `Hide` button, as Settings
+  › EPG's URLs do; Ctrl r does the same. For a panel's `get.php` link,
+  `Add as Xtream instead` sits before `Check and save`, its Enter
+  filling the Xtream form and selecting `Check and save` (4.1). The
+  password shows as dots, with a `Show` / `Hide` button; Ctrl r does
+  the same. Enter on `Check and save` says what is
   missing, if anything, else checks (`Checking the account…`) and saves
   (4.1), closing the form on the new provider with `Added <name>: p
   switches to it` in the status bar; a refusal or warning shows under
   it, a warning with `Save anyway`, which Enter again also does. Esc
   leaves the form. Enter on a provider (onboarding ticket 02) opens the
-  same form filled in, the Name note saying its id never changes,
+  same form filled in without the `Type` switch, the Name note saying
+  its id never changes,
   `Save changes` in place of `Check and save`, then `Remove provider…`.
   `Save changes` checks only when the URL or login changed (4.1), and
   closes the form on the provider with `Saved <name>`. `Remove
@@ -1850,7 +1880,8 @@ branch).
   for a refusal its text too, a path under the home folder written
   `~/…`. No file or no provider (`Add a provider`, no text): the
   add-provider form of
-  Settings › Providers (8.2), whose `Check and save` saves as there,
+  Settings › Providers (8.2), either type (M3U ticket 06), whose
+  `Check and save` saves as there,
   then shows the main screen with `Added <name>`, the first-run screen
   over it until the channels land. Modes too open (`Credentials open to
   others`): the refusal with its `chmod`, `Nothing is read from it until

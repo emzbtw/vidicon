@@ -1,6 +1,6 @@
 # 06: M3U in the providers form
 
-Status: open. Blocked by: 02, 04.
+Status: done. Blocked by: 02, 04.
 
 ## Goal
 
@@ -30,10 +30,19 @@ SPEC 4.1, 8.2. `src/config.rs` (file writing), `src/ui.rs`,
 
 ## Acceptance
 
-- [ ] Tests: the written `credentials.toml` for each type; the `get.php`
+- [x] Tests: the written `credentials.toml` for each type; the `get.php`
   detection, with no credentials kept in the M3U entry when switched.
-- [ ] Checked by the user adding a real playlist from the form.
-- [ ] `code-review` of the ticket's diff; findings fixed.
+  Also the form's check (`check_playlist`: channels, rejects, an 884
+  refusal, a path). Checked against the demo provider: an M3U add
+  writes `type`, `url` and no login at `0600`; a `get.php` link
+  switched to Xtream saves its origin and login and never fetches it.
+- [x] Checked by the user adding a real playlist from the form.
+- [x] `code-review` of the ticket's diff; findings fixed: the hint on
+  `Add as Xtream instead` and `Type` while a warning shows, a playlist
+  field that could not be cleared, the form's value slots named, a SPEC
+  line wrapped. Kept: Downloads stays with an M3U provider active (one
+  setting for every provider, SPEC 8.2); the check's fetch is not reused
+  by the first refresh, which fetches again.
 
 ## Out of scope
 

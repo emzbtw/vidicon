@@ -133,6 +133,68 @@ pub async fn playlist(
     Ok(Some((n, skipped)))
 }
 
+/// What the providers form's check of an M3U playlist found (M3U ticket
+/// 06).
+#[derive(Debug, PartialEq)]
+pub enum PlaylistCheck {
+    /// A channel list with this many channels.
+    Channels(usize),
+    /// Read, but refused as an import refuses it: why.
+    Rejected(String),
+    /// Not fetched or not opened: why, starting with the provider's name.
+    Unreachable(String),
+}
+
+/// The providers form's check (M3U ticket 06): the playlist fetched once
+/// through `client`, or read from its path, and counted without storing
+/// anything, so a refused one saves nothing.
+pub async fn check_playlist(client: &Client) -> PlaylistCheck {
+    let provider = client.provider();
+    let path = provider.playlist_path().map(Path::to_owned);
+    let (tx, rx) = mpsc::channel(CHUNKS_IN_FLIGHT);
+    let job = {
+        let (path, name, label) = (
+            path.clone(),
+            provider.name.clone(),
+            provider.playlist_label(),
+        );
+        tokio::task::spawn_blocking(move || {
+            let body: Box<dyn Read> = match path {
+                Some(path) => Box::new(
+                    std::fs::File::open(path)
+                        .map_err(|e| PlaylistCheck::Unreachable(format!("{name}: {label}: {e}")))?,
+                ),
+                None => Box::new(ChunkReader::new(rx)),
+            };
+            let mut n = 0;
+            m3u::read(body, |_| {
+                n += 1;
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .map_err(|e| match e {
+                m3u::ReadError::Body(e) => PlaylistCheck::Rejected(e),
+                m3u::ReadError::Each(never) => match never {},
+            })?;
+            Ok(n)
+        })
+    };
+    let fetched = match path {
+        Some(_) => Ok(0),
+        None => client.playlist(tx).await,
+    };
+    let read = job.await;
+    // A network error explains a parse error, so it wins.
+    if let Err(e) = fetched {
+        return PlaylistCheck::Unreachable(e);
+    }
+    match read {
+        Ok(Ok(0)) => PlaylistCheck::Rejected("the playlist has no channels".into()),
+        Ok(Ok(n)) => PlaylistCheck::Channels(n),
+        Ok(Err(check)) => check,
+        Err(e) => PlaylistCheck::Unreachable(format!("check task failed: {e}")),
+    }
+}
+
 /// Whether an M3U provider's playlist path changed since it was last
 /// read: `None` for a URL, which goes by age. A file that cannot be read
 /// counts as changed, so the import says why.
@@ -2662,5 +2724,65 @@ mod tests {
         )
         .unwrap();
         eprintln!("{n:?} in {} ms", t.elapsed().as_millis());
+    }
+
+    /// M3U ticket 06: the form's check counts a playlist's channels, by
+    /// URL or path, refuses one an import would, and tells a refused
+    /// fetch apart.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_form_checks_a_playlist_without_storing_it() {
+        use crate::config::Source;
+        use crate::fake_xtream::FakeXtream;
+        let fake = FakeXtream::start(|target| match target {
+            "/tv.m3u" => (
+                200,
+                "#EXTM3U\n#EXTINF:-1,Harbour One\nhttp://s/h\nhttp://s/juniper\n".into(),
+            ),
+            "/empty.m3u" => (200, "#EXTM3U\n#EXTINF:-1,Lost\n".into()),
+            "/page.html" => (200, "<html></html>".into()),
+            _ => (884, String::new()),
+        })
+        .await;
+        let check = |url: String| async move {
+            let provider = Provider {
+                id: "lists".into(),
+                name: "Lists".into(),
+                url,
+                username: String::new(),
+                password: String::new(),
+                epg: Vec::new(),
+                source: Source::M3u,
+                user_agent: None,
+            };
+            check_playlist(&Client::new(provider)).await
+        };
+        assert_eq!(
+            check(format!("{}/tv.m3u", fake.url())).await,
+            PlaylistCheck::Channels(2)
+        );
+        assert_eq!(
+            check(format!("{}/empty.m3u", fake.url())).await,
+            PlaylistCheck::Rejected("the playlist has no channels".into())
+        );
+        assert_eq!(
+            check(format!("{}/page.html", fake.url())).await,
+            PlaylistCheck::Rejected("not an M3U playlist: it does not start with #EXTM3U".into())
+        );
+        let PlaylistCheck::Unreachable(e) =
+            check(format!("{}/get.php?username=u&password=p", fake.url())).await
+        else {
+            panic!("a refused fetch is unreachable");
+        };
+        assert!(e.starts_with("Lists: ") && e.contains("884"), "{e}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tv.m3u");
+        std::fs::write(&file, "#EXTM3U\nhttp://s/a\n").unwrap();
+        assert_eq!(
+            check(file.display().to_string()).await,
+            PlaylistCheck::Channels(1)
+        );
+        let gone = dir.path().join("gone.m3u").display().to_string();
+        assert!(matches!(check(gone).await, PlaylistCheck::Unreachable(_)));
     }
 }

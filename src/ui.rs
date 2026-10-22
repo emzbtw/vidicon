@@ -3450,9 +3450,11 @@ impl SettingsView {
     }
 }
 
-/// The add-provider form's fields, in order, with what each note says;
-/// the check-and-save row follows them (onboarding ticket 01).
-const FORM_FIELDS: [(&str, &str); 4] = [
+/// The add-provider form's text fields, with what each note says
+/// (onboarding ticket 01): an Xtream provider's are the first four, an
+/// M3U one's the name, [`PLAYLIST_FIELD`] in the URL's place and the user
+/// agent (M3U ticket 06).
+const FORM_FIELDS: [(&str, &str); 5] = [
     (
         "Name",
         "Shown in the switcher · the provider's id is made from it",
@@ -3460,15 +3462,47 @@ const FORM_FIELDS: [(&str, &str); 4] = [
     ("Server URL", "http://host:port · only the origin is kept"),
     ("Username", ""),
     ("Password", "Ctrl r shows it"),
+    (
+        "User agent",
+        "Optional · sent for the playlist, else vidicon's own",
+    ),
 ];
+
+/// [`FORM_FIELDS`]' places in [`ProviderForm::values`]; an M3U
+/// provider's playlist sits at `URL`.
+const NAME: usize = 0;
+const URL: usize = 1;
+const USERNAME: usize = 2;
+const PASSWORD: usize = 3;
+const USER_AGENT: usize = 4;
+
+const PLAYLIST_FIELD: (&str, &str) = ("Playlist", "An http(s) URL or an absolute path");
+
+/// A row of the provider form, in [`ProviderForm::fields`]' order (M3U
+/// ticket 06).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FormField {
+    /// Xtream or M3U, while adding: fixed once saved.
+    Type,
+    /// [`FORM_FIELDS`]' field.
+    Text(usize),
+    /// "Add as Xtream instead", for a panel's `get.php` playlist.
+    AsXtream,
+    /// "Check and save", or "Save changes".
+    Save,
+    /// "Remove provider…".
+    Remove,
+}
 
 /// The add-provider form in Settings › Providers (onboarding ticket 01):
 /// what is typed, and where its account check is.
 #[derive(Default)]
 struct ProviderForm {
-    /// Name, server URL, username and password, as typed; the URL cut to
-    /// its origin once confirmed.
-    values: [String; 4],
+    /// [`FORM_FIELDS`], as typed; an Xtream URL cut to its origin once
+    /// confirmed.
+    values: [String; 5],
+    /// Xtream or M3U, chosen while adding (M3U ticket 06).
+    source: config::Source,
     /// The URL typed had a path, query or login, which was dropped.
     cut: bool,
     /// The password shows as typed rather than as dots.
@@ -3479,6 +3513,63 @@ struct ProviderForm {
     id: Option<String>,
     /// Its removal is being confirmed, in place of the form.
     remove: Option<RemoveConfirm>,
+}
+
+impl ProviderForm {
+    /// Its rows: the type while adding, the type's text fields, "Add as
+    /// Xtream instead" for a playlist URL that is a panel's `get.php`,
+    /// then saving, and removal while editing.
+    fn fields(&self) -> Vec<FormField> {
+        let adding = self.id.is_none();
+        let m3u = self.source == config::Source::M3u;
+        let mut fields = Vec::new();
+        if adding {
+            fields.push(FormField::Type);
+        }
+        let texts: &[usize] = if m3u {
+            &[NAME, URL, USER_AGENT]
+        } else {
+            &[NAME, URL, USERNAME, PASSWORD]
+        };
+        fields.extend(texts.iter().map(|&i| FormField::Text(i)));
+        if adding && m3u && config::xtream_playlist(&self.values[URL]).is_some() {
+            fields.push(FormField::AsXtream);
+        }
+        fields.push(FormField::Save);
+        if !adding {
+            fields.push(FormField::Remove);
+        }
+        fields
+    }
+
+    /// "Add as Xtream instead": Xtream, its server URL, username and
+    /// password from the `get.php` link in the playlist field, which goes,
+    /// as does the user agent. False when the link is not one.
+    fn switch_to_xtream(&mut self) -> bool {
+        let Some((origin, username, password)) = config::xtream_playlist(&self.values[URL]) else {
+            return false;
+        };
+        self.source = config::Source::Xtream;
+        self.values = [
+            std::mem::take(&mut self.values[NAME]),
+            origin,
+            username,
+            password,
+            String::new(),
+        ];
+        self.cut = true;
+        self.check = FormCheck::None;
+        true
+    }
+
+    fn field(&self, i: usize) -> Option<FormField> {
+        self.fields().get(i).copied()
+    }
+
+    /// Where `field` is among the rows.
+    fn at(&self, field: FormField) -> usize {
+        self.fields().iter().position(|&f| f == field).unwrap_or(0)
+    }
 }
 
 /// Removing the provider being edited (onboarding ticket 02): its name,
@@ -3497,6 +3588,13 @@ enum FormCheck {
     Checking(u64),
     /// The check warned, saying why; `Save anyway` saves this.
     Warned(String, Box<Checked>),
+}
+
+/// The form's check's answer: an Xtream account check's, or an M3U
+/// playlist's (M3U ticket 06).
+enum CheckAnswer {
+    Account(xtream::Check),
+    Playlist(import::PlaylistCheck),
 }
 
 /// A provider from the form, checked and ready to save: its client, which
@@ -3525,7 +3623,7 @@ fn provider_items(providers: &[(&str, String)], form: Option<&ProviderForm>) -> 
             .map(|(name, note)| row(name, note))
             .chain(std::iter::once(row(
                 "Add provider…",
-                "Checks the account, then saves it to credentials.toml",
+                "Xtream or M3U · checked, then saved to credentials.toml",
             )))
             .collect();
     };
@@ -3556,56 +3654,110 @@ fn provider_items(providers: &[(&str, String)], form: Option<&ProviderForm>) -> 
         );
         return vec![personal, row(&format!("Remove {}", r.name), &bulk)];
     }
-    let mut items: Vec<SettingItem> = FORM_FIELDS
-        .iter()
-        .zip(&form.values)
-        .map(|((label, note), value)| SettingItem {
-            label: (*label).into(),
-            note: (*note).into(),
-            value: value.as_str().into(),
-            kind: SettingKind::Text,
-            ..Default::default()
-        })
-        .collect();
-    if let Some(id) = &form.id {
-        items[0].note = format!("Shown in the switcher · its id, {id}, never changes").into();
-    }
-    if form.cut {
-        items[1].note = "Only the origin is kept: the path or login typed was dropped".into();
-    }
-    let password = &mut items[3];
-    if !form.revealed {
-        password.value = "•".repeat(form.values[3].chars().count()).into();
-    }
-    password.reveal = if form.revealed { "Hide" } else { "Show" }.into();
     let editing = form.id.is_some();
-    let mut save = row(
-        if editing {
-            "Save changes"
-        } else {
-            "Check and save"
-        },
-        match form.check {
-            FormCheck::None if editing => {
-                "Checks the account if the URL or login changed, then saves"
+    let m3u = form.source == config::Source::M3u;
+    form.fields()
+        .into_iter()
+        .map(|field| match field {
+            FormField::Type => {
+                let options: Vec<slint::SharedString> =
+                    vec!["Xtream".into(), "M3U".into()];
+                SettingItem {
+                    label: "Type".into(),
+                    note: if m3u {
+                        "Channels from a playlist link or file · fixed once saved"
+                    } else {
+                        "An Xtream Codes panel's login · fixed once saved"
+                    }
+                    .into(),
+                    kind: SettingKind::Toggle,
+                    options: ModelRc::new(VecModel::from(options)),
+                    chosen: m3u as i32,
+                    ..Default::default()
+                }
             }
-            FormCheck::None => "Checks the account, then saves it to credentials.toml",
-            FormCheck::Checking(_) => "Checking the account…",
-            FormCheck::Warned(..) => "Not saved",
-        },
-    );
-    if let FormCheck::Warned(why, _) = &form.check {
-        save.error = why.as_str().into();
-        save.button = "Save anyway".into();
-    }
-    items.push(save);
-    if editing {
-        items.push(row(
-            "Remove provider…",
-            "Asks first, with what it deletes and what it keeps",
-        ));
-    }
-    items
+            FormField::Text(i) => {
+                let (label, note) = if i == URL && m3u {
+                    PLAYLIST_FIELD
+                } else {
+                    FORM_FIELDS[i]
+                };
+                let mut item = SettingItem {
+                    label: label.into(),
+                    note: note.into(),
+                    value: form.values[i].as_str().into(),
+                    kind: SettingKind::Text,
+                    ..Default::default()
+                };
+                let shows = if form.revealed { "Hide" } else { "Show" };
+                match i {
+                    NAME => {
+                        if let Some(id) = &form.id {
+                            item.note =
+                                format!("Shown in the switcher · its id, {id}, never changes")
+                                    .into();
+                        }
+                    }
+                    // A playlist URL can hold a token (SPEC 4.1).
+                    URL if m3u => {
+                        item.value = shown_url(&form.values[URL], form.revealed).into();
+                        if form.values[URL].contains('?') {
+                            item.reveal = shows.into();
+                        }
+                    }
+                    URL if form.cut => {
+                        item.note =
+                            "Only the origin is kept: the path or login typed was dropped".into();
+                    }
+                    PASSWORD => {
+                        if !form.revealed {
+                            item.value = "•".repeat(form.values[PASSWORD].chars().count()).into();
+                        }
+                        item.reveal = shows.into();
+                    }
+                    _ => {}
+                }
+                item
+            }
+            FormField::AsXtream => row(
+                "Add as Xtream instead",
+                "This link is an Xtream panel's playlist: its address and login fill the form, adding the guide, catch-up, movies and series",
+            ),
+            FormField::Save => {
+                let mut save = row(
+                    if editing {
+                        "Save changes"
+                    } else {
+                        "Check and save"
+                    },
+                    match form.check {
+                        FormCheck::None if editing && m3u => {
+                            "Fetches the playlist if its URL or user agent changed, then saves"
+                        }
+                        FormCheck::None if editing => {
+                            "Checks the account if the URL or login changed, then saves"
+                        }
+                        FormCheck::None if m3u => {
+                            "Fetches the playlist once, then saves it to credentials.toml"
+                        }
+                        FormCheck::None => "Checks the account, then saves it to credentials.toml",
+                        FormCheck::Checking(_) if m3u => "Fetching the playlist…",
+                        FormCheck::Checking(_) => "Checking the account…",
+                        FormCheck::Warned(..) => "Not saved",
+                    },
+                );
+                if let FormCheck::Warned(why, _) = &form.check {
+                    save.error = why.as_str().into();
+                    save.button = "Save anyway".into();
+                }
+                save
+            }
+            FormField::Remove => row(
+                "Remove provider…",
+                "Asks first, with what it deletes and what it keeps",
+            ),
+        })
+        .collect()
 }
 
 /// The guide card (EPG sources ticket 05), each layer over the one
@@ -4476,7 +4628,7 @@ struct Screen {
     /// Starts a provider added in Settings (onboarding ticket 01).
     starter: Starter,
     /// The add-provider form's account checks answer here, numbered.
-    checked_tx: mpsc::UnboundedSender<(u64, Checked, xtream::Check)>,
+    checked_tx: mpsc::UnboundedSender<(u64, Checked, CheckAnswer)>,
     checks: u64,
     /// Settings › EPG's counts are read off the UI thread from the
     /// database at `db_path` and answer here, numbered; only the last
@@ -8309,6 +8461,10 @@ impl Screen {
                 .iter()
                 .map(|s| {
                     let note = match &s.info {
+                        // No account to show (M3U ticket 06).
+                        _ if s.provider.source == config::Source::M3u => {
+                            format!("{} · M3U · {}", s.provider.id, s.provider.playlist_label())
+                        }
                         Some(a) => {
                             let text = account_text(a, now).0;
                             match a.user.max_connections {
@@ -8357,13 +8513,20 @@ impl Screen {
             && items
                 .get(view.field)
                 .is_some_and(|i| i.kind == SettingKind::Stepper);
-        // The password field, typed into or selected.
-        let password = view.form.is_some() && view.field == 3;
+        // The password field, or an M3U playlist's, typed into or
+        // selected.
+        let field = view.form.as_ref().and_then(|f| f.field(view.field));
+        let password = field == Some(FormField::Text(PASSWORD));
+        let playlist = field == Some(FormField::Text(URL))
+            && view
+                .form
+                .as_ref()
+                .is_some_and(|f| f.source == config::Source::M3u);
         let hint = if let Some(hint) = self.epg_hint() {
             hint
         } else if view.create.is_some() {
             "Enter creates it · Esc cancels".into()
-        } else if view.editing.is_some() && password {
+        } else if view.editing.is_some() && (password || playlist) {
             "Type · Ctrl v pastes · Ctrl r shows · Enter keeps · Ctrl u clears · Esc cancels".into()
         } else if view.editing.is_some() && view.form.is_some() {
             "Type · Ctrl v pastes · Enter keeps · Ctrl u clears · Esc cancels".into()
@@ -8379,14 +8542,20 @@ impl Screen {
             };
             format!("j / k move · {enter} · Esc back to the form")
         } else if let Some(form) = &view.form {
-            let enter = match form.check {
-                FormCheck::Warned(..) => "Enter saves anyway",
-                _ if view.field == FORM_FIELDS.len() && form.id.is_some() => "Enter saves",
-                _ if view.field == FORM_FIELDS.len() => "Enter checks and saves",
-                _ if view.field > FORM_FIELDS.len() => "Enter asks first",
+            let enter = match (&form.check, field) {
+                (_, Some(FormField::AsXtream)) => "Enter fills the form",
+                (_, Some(FormField::Type)) => "Enter switches",
+                (FormCheck::Warned(..), _) => "Enter saves anyway",
+                (_, Some(FormField::Save)) if form.id.is_some() => "Enter saves",
+                (_, Some(FormField::Save)) => "Enter checks and saves",
+                (_, Some(FormField::Remove)) => "Enter asks first",
                 _ => "Enter edits",
             };
-            let show = if password { " · Ctrl r shows" } else { "" };
+            let show = if password || playlist {
+                " · Ctrl r shows"
+            } else {
+                ""
+            };
             let leave = if self.setup.is_some() {
                 "q quits"
             } else {
@@ -8406,8 +8575,12 @@ impl Screen {
             format!("Tab {tab}{enter} · Esc to close")
         };
         let mut text = view.editing.clone().unwrap_or_default();
-        if password && view.form.as_ref().is_some_and(|f| !f.revealed) {
+        let revealed = view.form.as_ref().is_some_and(|f| f.revealed);
+        if password && !revealed {
             text = "•".repeat(text.chars().count());
+        }
+        if playlist {
+            text = shown_url(&text, revealed);
         }
         // A source's URL, typed into, masked as it shows (SPEC 4.1).
         if let Some(epg) = &view.epg
@@ -8491,7 +8664,10 @@ impl Screen {
                 }
                 SettingKind::Text => {
                     view.editing = Some(match &view.form {
-                        Some(form) => form.values[view.field].clone(),
+                        Some(form) => match form.field(view.field) {
+                            Some(FormField::Text(i)) => form.values[i].clone(),
+                            _ => String::new(),
+                        },
                         None => {
                             setting_text(&self.settings, SETTING_FIELDS[view.section][view.field])
                         }
@@ -8500,7 +8676,12 @@ impl Screen {
                 SettingKind::Stepper => {}
                 SettingKind::Row => match &view.form {
                     Some(form) if form.remove.is_some() => return self.remove_provider(),
-                    Some(_) if view.field > FORM_FIELDS.len() => return self.ask_remove(),
+                    Some(form) if form.field(view.field) == Some(FormField::Remove) => {
+                        return self.ask_remove();
+                    }
+                    Some(form) if form.field(view.field) == Some(FormField::AsXtream) => {
+                        return self.as_xtream();
+                    }
                     Some(form) => match form.check {
                         FormCheck::None => return self.check_provider(),
                         FormCheck::Warned(..) => return self.save_anyway(),
@@ -8555,9 +8736,11 @@ impl Screen {
             return self.epg_confirm(text);
         }
         if let Some(form) = &mut view.form {
-            let field = view.field;
-            let value = if field == 1 {
-                match config::origin(&text) {
+            let Some(FormField::Text(field)) = form.field(view.field) else {
+                return;
+            };
+            let value = match field {
+                URL if form.source == config::Source::Xtream => match config::origin(&text) {
                     Ok((origin, cut)) => {
                         form.cut = cut;
                         origin
@@ -8566,11 +8749,19 @@ impl Screen {
                         view.error = Some(e);
                         return self.show_settings();
                     }
-                }
-            } else if field == 0 {
-                text.trim().to_owned()
-            } else {
-                text
+                },
+                // Cleared, or checked without fetching, as Settings › EPG
+                // checks a source.
+                URL if text.trim().is_empty() => String::new(),
+                URL => match config::check_source(&text) {
+                    Ok(_) => text.trim().to_owned(),
+                    Err(e) => {
+                        view.error = Some(e);
+                        return self.show_settings();
+                    }
+                },
+                NAME | USER_AGENT => text.trim().to_owned(),
+                _ => text,
             };
             if form.values[field] != value {
                 form.values[field] = value;
@@ -8674,6 +8865,24 @@ impl Screen {
         }
         if let Some(r) = view.form.as_mut().and_then(|f| f.remove.as_mut()) {
             r.personal = option == 1;
+            return self.show_settings();
+        }
+        // The type (M3U ticket 06): the URL typed is for the other one.
+        if let Some(form) = &mut view.form
+            && form.field(view.field) == Some(FormField::Type)
+        {
+            let source = if option == 1 {
+                config::Source::M3u
+            } else {
+                config::Source::Xtream
+            };
+            if form.source != source {
+                form.source = source;
+                form.values[URL].clear();
+                form.cut = false;
+                form.check = FormCheck::None;
+                view.error = None;
+            }
             return self.show_settings();
         }
         if view.locked().is_none() && SETTINGS_SECTIONS[view.section] == "General" {
@@ -9687,25 +9896,35 @@ impl Screen {
         let Some(form) = &mut view.form else {
             return;
         };
+        let m3u = form.source == config::Source::M3u;
         let missing = [
             "Must give a name",
-            "Must give the server's address",
+            if m3u {
+                "Must give the playlist's URL or path"
+            } else {
+                "Must give the server's address"
+            },
             "Must give a username",
             "Must give a password",
         ];
-        if let Some(i) = form.values.iter().position(String::is_empty) {
-            view.field = i;
+        let required = if m3u {
+            NAME..USERNAME
+        } else {
+            NAME..USER_AGENT
+        };
+        if let Some(i) = required.into_iter().find(|&i| form.values[i].is_empty()) {
+            view.field = form.at(FormField::Text(i));
             view.error = Some(missing[i].into());
             return self.show_settings();
         }
-        let [name, url, username, password] = form.values.clone();
-        // The form does not edit guide sources, the type or the user
-        // agent; an edit keeps them.
+        let [name, url, username, password, user_agent] = form.values.clone();
+        // The form does not edit guide sources; an edit keeps them.
         let kept = self
             .sources
             .iter()
             .find(|s| form.id.as_ref() == Some(&s.provider.id))
             .map(|s| &s.provider);
+        // Each type's own keys only: an M3U provider holds no login.
         let provider = Provider {
             id: form
                 .id
@@ -9713,11 +9932,11 @@ impl Screen {
                 .unwrap_or_else(|| config::slug(&name, &taken)),
             name,
             url,
-            username,
-            password,
+            username: if m3u { String::new() } else { username },
+            password: if m3u { String::new() } else { password },
             epg: kept.map(|p| p.epg.clone()).unwrap_or_default(),
-            source: kept.map_or(config::Source::Xtream, |p| p.source),
-            user_agent: kept.and_then(|p| p.user_agent.clone()),
+            source: form.source,
+            user_agent: (m3u && !user_agent.is_empty()).then_some(user_agent),
         };
         // Only the name changed: saved without a check.
         if let Some(source) = self
@@ -9726,8 +9945,13 @@ impl Screen {
             .find(|s| form.id.as_ref() == Some(&s.provider.id))
         {
             let p = &source.provider;
-            if (&p.url, &p.username, &p.password)
-                == (&provider.url, &provider.username, &provider.password)
+            if (&p.url, &p.username, &p.password, &p.user_agent)
+                == (
+                    &provider.url,
+                    &provider.username,
+                    &provider.password,
+                    &provider.user_agent,
+                )
             {
                 let client = source.client.clone();
                 return self.save_provider(Checked {
@@ -9743,22 +9967,28 @@ impl Screen {
         let client = Arc::new(Client::new(provider.clone()));
         let (n, tx) = (self.checks, self.checked_tx.clone());
         self.starter.rt.spawn(async move {
-            let check = client.check().await;
+            let answer = if m3u {
+                CheckAnswer::Playlist(import::check_playlist(&client).await)
+            } else {
+                CheckAnswer::Account(client.check().await)
+            };
             let checked = Checked {
                 provider,
                 client,
                 info: None,
             };
-            let _ = tx.send((n, checked, check));
+            let _ = tx.send((n, checked, answer));
         });
         self.show_settings();
     }
 
     /// The form's account check answered: saved if it logged in to an
     /// active account; wrong credentials refused; an expired or disabled
-    /// account, no answer or not Xtream warned, with `Save anyway`. An
-    /// answer for a form since changed or closed is dropped.
-    fn provider_checked(&mut self, n: u64, mut checked: Checked, check: xtream::Check) {
+    /// account, no answer or not Xtream warned, with `Save anyway`. A
+    /// playlist's (M3U ticket 06): saved if it has channels, refused as an
+    /// import refuses it, warned if not fetched. An answer for a form
+    /// since changed or closed is dropped.
+    fn provider_checked(&mut self, n: u64, mut checked: Checked, answer: CheckAnswer) {
         let Some(view) = &mut self.settings_view else {
             return;
         };
@@ -9772,6 +10002,23 @@ impl Screen {
         let prefix = format!("{}: ", checked.provider.name);
         let why = |e: &str| e.strip_prefix(&prefix).unwrap_or(e).to_owned();
         let now = import::unix_now();
+        let check = match answer {
+            CheckAnswer::Account(check) => check,
+            CheckAnswer::Playlist(import::PlaylistCheck::Channels(_)) => {
+                return self.save_provider(checked);
+            }
+            CheckAnswer::Playlist(import::PlaylistCheck::Rejected(e)) => {
+                form.check = FormCheck::None;
+                view.field = form.at(FormField::Save);
+                view.error = Some(format!("The playlist was refused: {e}"));
+                return self.show_settings();
+            }
+            CheckAnswer::Playlist(import::PlaylistCheck::Unreachable(e)) => {
+                let w = format!("Cannot fetch the playlist: {}", why(&e));
+                form.check = FormCheck::Warned(w, Box::new(checked));
+                return self.show_settings();
+            }
+        };
         let warning = match check {
             xtream::Check::Account(a) => {
                 let blocked = a.user_info.blocked(now);
@@ -9787,7 +10034,7 @@ impl Screen {
             }
             xtream::Check::Rejected => {
                 form.check = FormCheck::None;
-                view.field = FORM_FIELDS.len();
+                view.field = form.at(FormField::Save);
                 view.error = Some("The provider refused this username and password".into());
                 return self.show_settings();
             }
@@ -9835,8 +10082,8 @@ impl Screen {
             log::error!("{e}");
             if let Some(form) = &mut view.form {
                 form.check = FormCheck::None;
+                view.field = form.at(FormField::Save);
             }
-            view.field = FORM_FIELDS.len();
             view.error = Some(e);
             return self.show_settings();
         }
@@ -9899,11 +10146,31 @@ impl Screen {
                 p.url.clone(),
                 p.username.clone(),
                 p.password.clone(),
+                p.user_agent.clone().unwrap_or_default(),
             ],
+            source: p.source,
             id: Some(p.id.clone()),
             ..Default::default()
         });
         view.field = 0;
+        view.error = None;
+        self.show_settings();
+    }
+
+    /// "Add as Xtream instead" (M3U ticket 06): the form switched to
+    /// Xtream, its server URL, username and password taken from the
+    /// `get.php` link, which is not kept, then on `Check and save`.
+    fn as_xtream(&mut self) {
+        let Some(view) = &mut self.settings_view else {
+            return;
+        };
+        let Some(form) = &mut view.form else {
+            return;
+        };
+        if !form.switch_to_xtream() {
+            return;
+        }
+        view.field = form.at(FormField::Save);
         view.error = None;
         self.show_settings();
     }
@@ -10152,9 +10419,9 @@ impl Screen {
             {
                 if let Some(form) = &mut view.form {
                     form.remove = None;
+                    view.field = form.at(FormField::Remove);
                 }
                 view.error = None;
-                view.field = FORM_FIELDS.len() + 1;
                 self.show_settings();
             }
             // Esc leaves the form for the providers, on the provider edited
@@ -11736,8 +12003,8 @@ pub fn run(
     {
         let screen = screen.clone();
         slint::spawn_local(async move {
-            while let Some((n, checked, check)) = checked_rx.recv().await {
-                screen.borrow_mut().provider_checked(n, checked, check);
+            while let Some((n, checked, answer)) = checked_rx.recv().await {
+                screen.borrow_mut().provider_checked(n, checked, answer);
             }
         })
         .map_err(|e| e.to_string())?;
@@ -13642,12 +13909,26 @@ mod tests {
                 "http://127.0.0.1:47811".into(),
                 "demo".into(),
                 "hunter2".into(),
+                String::new(),
             ],
             cut: true,
             ..Default::default()
         };
         let items = provider_items(&providers, Some(&form));
-        assert_eq!(items.len(), 5);
+        let labels: Vec<String> = items.iter().map(|i| i.label.to_string()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Type",
+                "Name",
+                "Server URL",
+                "Username",
+                "Password",
+                "Check and save"
+            ]
+        );
+        assert_eq!((items[0].kind, items[0].chosen), (SettingKind::Toggle, 0));
+        let items = &items[1..];
         assert_eq!(items[3].value, "•••••••");
         assert_eq!(items[3].reveal, "Show");
         assert!(items[1].note.contains("dropped"), "{}", items[1].note);
@@ -13662,13 +13943,13 @@ mod tests {
         form.revealed = true;
         let items = provider_items(&providers, Some(&form));
         assert_eq!(
-            (items[3].value.as_str(), items[3].reveal.as_str()),
+            (items[4].value.as_str(), items[4].reveal.as_str()),
             ("hunter2", "Hide")
         );
 
         form.check = FormCheck::Checking(1);
         let items = provider_items(&providers, Some(&form));
-        assert_eq!(items[4].note, "Checking the account…");
+        assert_eq!(items[5].note, "Checking the account…");
 
         // Onboarding ticket 02: editing names the id, saves changes and
         // offers removal, which asks with the counts.
@@ -13718,6 +13999,105 @@ mod tests {
         assert_eq!(
             items[1].note,
             "Deletes 2 channels, 1 movie and 3 series and their guide · cancels 1 scheduled recording · forgets 0 queued downloads"
+        );
+    }
+
+    /// M3U ticket 06: an M3U form asks for the playlist and a user agent,
+    /// masks a token, offers Xtream for a panel's `get.php` link, and
+    /// switching keeps no login in the playlist field. Editing fixes the
+    /// type.
+    #[test]
+    fn an_m3u_form_offers_xtream_for_a_panel_link() {
+        use super::{FormField, ProviderForm, SettingKind, provider_items};
+        use crate::config::Source;
+        let labels = |form: &ProviderForm| -> Vec<String> {
+            provider_items(&[], Some(form))
+                .iter()
+                .map(|i| i.label.to_string())
+                .collect()
+        };
+        let mut form = ProviderForm {
+            values: [
+                "Lists".into(),
+                "https://lists.example.net/tv.m3u?token=tok-9x".into(),
+                String::new(),
+                String::new(),
+                "Example/1.0".into(),
+            ],
+            source: Source::M3u,
+            ..Default::default()
+        };
+        assert_eq!(
+            labels(&form),
+            ["Type", "Name", "Playlist", "User agent", "Check and save"]
+        );
+        let items = provider_items(&[], Some(&form));
+        assert_eq!((items[0].kind, items[0].chosen), (SettingKind::Toggle, 1));
+        assert_eq!(items[2].value, "https://lists.example.net/tv.m3u?•••");
+        assert_eq!(items[2].reveal, "Show");
+        assert!(!form.switch_to_xtream());
+
+        form.values[1] =
+            "http://panel.example.net:8080/get.php?username=demo&password=hunter2&type=m3u".into();
+        assert_eq!(
+            labels(&form),
+            [
+                "Type",
+                "Name",
+                "Playlist",
+                "User agent",
+                "Add as Xtream instead",
+                "Check and save"
+            ]
+        );
+        assert_eq!(form.at(FormField::Save), 5);
+        assert!(form.switch_to_xtream());
+        assert_eq!(form.source, Source::Xtream);
+        assert_eq!(
+            form.values,
+            [
+                "Lists",
+                "http://panel.example.net:8080",
+                "demo",
+                "hunter2",
+                ""
+            ]
+        );
+        assert!(form.cut);
+        assert_eq!(
+            labels(&form),
+            [
+                "Type",
+                "Name",
+                "Server URL",
+                "Username",
+                "Password",
+                "Check and save"
+            ]
+        );
+
+        // Once saved, the type is fixed and no Xtream offer is made.
+        let form = ProviderForm {
+            values: [
+                "Lists".into(),
+                "http://panel.example.net/get.php?username=u&password=p".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+            source: Source::M3u,
+            id: Some("lists".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            labels(&form),
+            [
+                "Name",
+                "Playlist",
+                "User agent",
+                "Save changes",
+                "Remove provider…"
+            ]
         );
     }
 
