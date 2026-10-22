@@ -1,6 +1,6 @@
 //! `--probe-epg <url-or-path>` (`devtools` only, EPG sources ticket 01): how
 //! an external XMLTV feed matches the provider's channels. Streams the feed
-//! once, gzipped or plain, and prints counts only: size, channels,
+//! once, gzip, xz or plain, and prints counts only: size, channels,
 //! programmes, reach, time offsets; then matches against the database by
 //! exact id and by normalised name, and compares programme times with the
 //! provider's guide where both have the channel. Never URLs, hosts, ids or
@@ -11,12 +11,11 @@ use crate::epg_sources::{Index, Match, Norm, epg_norm};
 use crate::import::{ChunkReader, FeedChannel, unix_now, xmltv_time};
 use crate::store::{self, name_norm};
 use crate::xtream::http;
-use flate2::bufread::MultiGzDecoder;
 use quick_xml::events::Event;
 use reqwest::Url;
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
 use std::rc::Rc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -191,10 +190,10 @@ type Sampled = (i64, String);
 
 #[derive(Default)]
 struct Feed {
-    /// Bytes read, and after gunzip when the body was gzipped.
+    /// Bytes read, and after unpacking when the body was gzip or xz.
     read: u64,
     xml: u64,
-    gzipped: bool,
+    packed: bool,
     channels: Vec<FeedChannel>,
     /// Per programme channel id: first start, last stop, count.
     reach: HashMap<String, (i64, i64, usize)>,
@@ -228,27 +227,16 @@ enum Field {
     Title,
 }
 
-/// Pull-parses a whole XMLTV body, gzipped or not, into counts. Only
+/// Pull-parses a whole XMLTV body, gzip, xz or plain, into counts. Only
 /// channel ids and names, per-channel reach, and programmes near now are
 /// held.
 fn scan(body: impl Read, now: i64) -> Result<Feed, String> {
     let (read, xml) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
-    let mut body = BufReader::with_capacity(
-        64 * 1024,
-        Counting {
-            inner: body,
-            n: read.clone(),
-        },
-    );
-    let gzipped = body
-        .fill_buf()
-        .map_err(|e| format!("feed: {e}"))?
-        .starts_with(&[0x1f, 0x8b]);
-    let inner: Box<dyn Read> = if gzipped {
-        Box::new(MultiGzDecoder::new(body))
-    } else {
-        Box::new(body)
-    };
+    let inner = crate::import::unpacked(Counting {
+        inner: body,
+        n: read.clone(),
+    })
+    .map_err(|e| format!("feed: {e}"))?;
     let src = BufReader::with_capacity(
         64 * 1024,
         Counting {
@@ -256,10 +244,7 @@ fn scan(body: impl Read, now: i64) -> Result<Feed, String> {
             n: xml.clone(),
         },
     );
-    let mut feed = Feed {
-        gzipped,
-        ..Feed::default()
-    };
+    let mut feed = Feed::default();
     let mut reader = quick_xml::Reader::from_reader(src);
     let mut buf = Vec::new();
     let mut channel: Option<FeedChannel> = None;
@@ -385,14 +370,15 @@ fn scan(body: impl Read, now: i64) -> Result<Feed, String> {
     }
     drop(reader);
     (feed.read, feed.xml) = (read.get(), xml.get());
+    feed.packed = feed.read != feed.xml;
     Ok(feed)
 }
 
 fn print_feed(feed: &Feed, now: i64, secs: f64) {
     let mb = |b: u64| b as f64 / 1e6;
-    if feed.gzipped {
+    if feed.packed {
         println!(
-            "feed: {:.1} MB gzipped, {:.1} MB XML, read in {secs:.1} s",
+            "feed: {:.1} MB packed, {:.1} MB XML, read in {secs:.1} s",
             mb(feed.read),
             mb(feed.xml)
         );
@@ -543,15 +529,16 @@ mod tests {
     </tv>"#;
 
     #[test]
-    fn scan_counts_plain_and_gzipped() {
+    fn scan_counts_plain_gzipped_and_xz() {
         // 09:00 UTC; the first programme starts at 08:00 UTC.
         let now = xmltv_time("20261012090000").unwrap();
         let mut gz = GzEncoder::new(Vec::new(), Compression::default());
         gz.write_all(XML.as_bytes()).unwrap();
         let gz = gz.finish().unwrap();
-        for (body, gzipped) in [(XML.as_bytes().to_vec(), false), (gz, true)] {
+        let xz = crate::import::xz(XML.as_bytes());
+        for (body, packed) in [(XML.as_bytes().to_vec(), false), (gz, true), (xz, true)] {
             let f = scan(&body[..], now).unwrap();
-            assert_eq!(f.gzipped, gzipped);
+            assert_eq!(f.packed, packed);
             assert_eq!(f.xml, XML.len() as u64);
             assert_eq!(f.read, body.len() as u64);
             assert_eq!(f.channels.len(), 2);
