@@ -8978,11 +8978,9 @@ impl Screen {
                 }
                 2 => {
                     let (themes, saved) = theme_options(&view.themes, &self.settings.theme);
-                    // The saved one again reads its file again, as one made
-                    // since it was missing.
-                    if option == saved {
-                        self.watch_theme();
-                    } else if let Some(choice) = themes.into_iter().nth(option) {
+                    if option != saved
+                        && let Some(choice) = themes.into_iter().nth(option)
+                    {
                         self.save_setting("theme", Some(choice.name.into()));
                     }
                 }
