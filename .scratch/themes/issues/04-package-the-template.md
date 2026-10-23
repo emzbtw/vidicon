@@ -1,6 +1,6 @@
 # 04: Ship the Noctalia template in the packages
 
-Status: open. Blocked by: 03.
+Status: done. Blocked by: 03.
 
 ## Goal
 
@@ -40,11 +40,10 @@ for the release and its install tests.
   listing it. (2026-10-23: `nix profile add --profile` into a scratch
   profile; Noctalia 5.3 listed it under User templates and rendered it
   through the profile's symlink into the store.)
-- [ ] The deb, rpm and tarball from a release build hold it; the install
-  test checks the deb and rpm. (2026-10-23: a local cargo-deb and
-  cargo-generate-rpm 0.21.1 build both hold it, and the install test
-  checks for it. The tarball and the install test run only in the
-  release workflow: tick this after the next release run.)
+- [x] The deb, rpm and tarball from a release build hold it; the install
+  test checks the deb and rpm. (2026-10-23, v0.3.0: the release run's six
+  install tests passed with the check; the tarball lists
+  `noctalia-template.toml`.)
 - [x] Both PKGBUILDs install it (`makepkg` in a container, or checked by
   reading if no Arch image is at hand). (Checked by reading; `git
   archive` includes `contrib/`. `vidicon` builds only from the next tag:
