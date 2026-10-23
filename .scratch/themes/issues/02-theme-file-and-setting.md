@@ -1,6 +1,6 @@
 # 02: Theme file and the `theme` setting
 
-Status: open. Blocked by: 01.
+Status: done. Blocked by: 01.
 
 ## Goal
 
@@ -32,10 +32,10 @@ files), 8.1. `src/config.rs`, `src/ui.rs`, the palette type from 01.
 
 ## Acceptance
 
-- [ ] Tests: a full file, a partial file (defaults fill the rest), a
+- [x] Tests: a full file, a partial file (defaults fill the rest), a
   bad colour (line named, last good kept), unknown keys ignored, the
   key round-trips through `toml_edit` saving.
-- [ ] Checked by screenshot against the demo provider with a hand-made
+- [x] Checked by screenshot against the demo provider with a hand-made
   theme file, and by rewriting the file while the app runs (the palette
   changes without a restart).
 

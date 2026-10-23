@@ -4461,7 +4461,7 @@ fn setup_items(setup: &config::Setup) -> Vec<SettingItem> {
 /// Each Settings section's keys in `config.toml`, field by field.
 const SETTING_FIELDS: [&[&str]; 6] = [
     &[],
-    &["active_provider", "refresh_hours"],
+    &["active_provider", "refresh_hours", "theme"],
     &["mpv_path", "extra_mpv_args"],
     &[
         "recordings_dir",
@@ -4489,11 +4489,13 @@ fn setting_text(settings: &config::Settings, key: &str) -> String {
 /// The fields of Settings section `section`, from `settings`: General's
 /// switch and picker; Player, Recording and Downloads text and steppers
 /// (settings ticket 02); Providers and EPG are empty. `providers` is each
-/// provider's id and name.
+/// provider's id and name; `theme_note` is why the theme's palette is not
+/// in use.
 fn setting_items(
     section: usize,
     settings: &config::Settings,
     providers: &[(&str, &str)],
+    theme_note: Option<&str>,
 ) -> Vec<SettingItem> {
     let text = |label: &str, note: &str, key: &str| SettingItem {
         label: label.into(),
@@ -4546,6 +4548,15 @@ fn setting_items(
                     kind: SettingKind::Toggle,
                     options: options(vec!["12 h", "6 h"]),
                     chosen: refresh as i32,
+                    ..Default::default()
+                },
+                SettingItem {
+                    label: "Theme".into(),
+                    note: "theme · Noctalia follows its palette file".into(),
+                    kind: SettingKind::Toggle,
+                    options: options(vec!["Default", "Noctalia"]),
+                    chosen: (settings.theme == config::Theme::Noctalia) as i32,
+                    error: theme_note.unwrap_or_default().into(),
                     ..Default::default()
                 },
             ]
@@ -4736,6 +4747,12 @@ struct Screen {
     panel_timer: slint::Timer,
     /// Counts a backoff down in the refresh panel.
     stage_timer: slint::Timer,
+    /// The Noctalia palette file while `theme` is `"noctalia"`, and the
+    /// timer that checks it.
+    theme: Option<theme::Watched>,
+    theme_timer: slint::Timer,
+    /// This screen, for a timer to reach it.
+    me: std::rc::Weak<RefCell<Screen>>,
     /// The detail panel's LATER rows.
     later: Rc<VecModel<LaterItem>>,
     logos: Rc<Logos>,
@@ -8515,7 +8532,8 @@ impl Screen {
             .iter()
             .map(|s| (s.provider.id.as_str(), s.provider.name.as_str()))
             .collect();
-        setting_items(view.section, &self.settings, &providers)
+        let theme_note = self.theme.as_ref().and_then(|t| t.note.as_deref());
+        setting_items(view.section, &self.settings, &providers, theme_note)
     }
 
     fn show_settings(&self) {
@@ -8926,6 +8944,10 @@ impl Screen {
                     if hours != self.settings.refresh_hours {
                         self.save_setting("refresh_hours", Some(i64::from(hours).into()));
                     }
+                }
+                2 => {
+                    let theme = if option == 0 { "default" } else { "noctalia" };
+                    self.save_setting("theme", Some(theme.into()));
                 }
                 _ => {}
             }
@@ -10398,7 +10420,48 @@ impl Screen {
         self.recordings_dir = settings.recordings_dir.clone();
         self.downloads_dir = settings.downloads_dir.clone();
         self.record_after = i64::from(settings.record_after) * 60;
+        let theme_changed = settings.theme != self.settings.theme;
         self.settings = settings;
+        if theme_changed {
+            self.watch_theme();
+        }
+    }
+
+    /// Applies the palette `theme` names. With `"noctalia"` its file is
+    /// read, then checked again each second, a change applying live
+    /// (themes ticket 02).
+    fn watch_theme(&mut self) {
+        let watched = match self.settings.theme {
+            config::Theme::Default => None,
+            config::Theme::Noctalia => Some(theme::Watched::new(config::noctalia_palette_path())),
+        };
+        let palette = watched.as_ref().map(|w| w.palette).unwrap_or_default();
+        palette.apply(&self.window());
+        self.theme = watched;
+        if self.theme.is_none() {
+            self.theme_timer.stop();
+            return;
+        }
+        let me = self.me.clone();
+        self.theme_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(1),
+            move || {
+                let Some(screen) = me.upgrade() else {
+                    return;
+                };
+                let mut s = screen.borrow_mut();
+                let Some(watched) = &mut s.theme else {
+                    return;
+                };
+                if !watched.poll() {
+                    return;
+                }
+                let palette = watched.palette;
+                palette.apply(&s.window());
+                s.show_settings();
+            },
+        );
     }
 
     /// A key while the Settings view is open, which is modal: Tab between
@@ -11600,7 +11663,6 @@ pub fn run(
         });
     }
     let window = AppWindow::new().map_err(|e| e.to_string())?;
-    theme::Palette::default().apply(&window);
     // Wayland app id for compositor window rules; mpv's is `vidicon-mpv`.
     // Must be set before the window is shown.
     slint::set_xdg_app_id("vidicon").map_err(|e| e.to_string())?;
@@ -11800,88 +11862,94 @@ pub fn run(
     window.set_settings_fields(ModelRc::from(settings_rows.clone()));
     let (checked_tx, mut checked_rx) = mpsc::unbounded_channel();
     let (epg_tx, mut epg_rx) = mpsc::unbounded_channel();
-    let screen = Rc::new(RefCell::new(Screen {
-        window: window.as_weak(),
-        conn,
-        sources,
-        active,
-        setup: None,
-        picking: None,
-        dashboard: None,
-        keys_open: false,
-        card: Card::default(),
-        recordings: None,
-        settings_view: None,
-        settings: settings.clone(),
-        settings_path: config::settings_path(),
-        credentials_path,
-        starter,
-        checked_tx,
-        checks: 0,
-        db_path: db_path.clone(),
-        epg_tx,
-        epg_reads: 0,
-        cancel_timer: slint::Timer::default(),
-        player_tx,
-        recorder_tx: recorder_tx.clone(),
-        write_tx,
-        kind: Kind::Live,
-        categories: Vec::new(),
-        category: 0,
-        order,
-        hidden: false,
-        manage: None,
-        manage_rows,
-        settings_rows,
-        base: Vec::new(),
-        channels,
-        selected: 0,
-        guide_open: false,
-        guide,
-        guide_selected: 0,
-        guide_anchor: None,
-        guide_on_now: true,
-        guide_view: 0,
-        guide_drag_from: 0,
-        guide_base: Vec::new(),
-        guide_back: guide_back(0),
-        guide_query: String::new(),
-        guide_searching: false,
-        now_playing: None,
-        movie: None,
-        plays: 0,
-        handed: 0,
-        info_tx,
-        info_asked: HashMap::new(),
-        series: SeriesPanel::default(),
-        alternates: AlternatesPanel::default(),
-        mpv: None,
-        recordings_dir: settings.recordings_dir.clone(),
-        downloads_dir: settings.downloads_dir.clone(),
-        downloads_tab: false,
-        dl_asked: (String::new(), false),
-        record_after: i64::from(settings.record_after) * 60,
-        behind_timer: slint::Timer::default(),
-        rec_timer: slint::Timer::default(),
-        pos_timer: slint::Timer::default(),
-        next: None,
-        next_timer: slint::Timer::default(),
-        recent: Vec::new(),
-        clear_timer: slint::Timer::default(),
-        panel_timer: slint::Timer::default(),
-        stage_timer: slint::Timer::default(),
-        later,
-        logos,
-        detail_logo: None,
-        shown_logos: HashSet::new(),
-        number: NumberEntry::default(),
-        query: String::new(),
-        searching: false,
-        wide: None,
-        search: search::Search::new(),
-        rebuild_index: Box::new(rebuild_index),
-        replaying: false,
-    }));
+    let screen = Rc::new_cyclic(|me| {
+        RefCell::new(Screen {
+            me: me.clone(),
+            window: window.as_weak(),
+            conn,
+            sources,
+            active,
+            setup: None,
+            picking: None,
+            dashboard: None,
+            keys_open: false,
+            card: Card::default(),
+            recordings: None,
+            settings_view: None,
+            settings: settings.clone(),
+            settings_path: config::settings_path(),
+            credentials_path,
+            starter,
+            checked_tx,
+            checks: 0,
+            db_path: db_path.clone(),
+            epg_tx,
+            epg_reads: 0,
+            cancel_timer: slint::Timer::default(),
+            player_tx,
+            recorder_tx: recorder_tx.clone(),
+            write_tx,
+            kind: Kind::Live,
+            categories: Vec::new(),
+            category: 0,
+            order,
+            hidden: false,
+            manage: None,
+            manage_rows,
+            settings_rows,
+            base: Vec::new(),
+            channels,
+            selected: 0,
+            guide_open: false,
+            guide,
+            guide_selected: 0,
+            guide_anchor: None,
+            guide_on_now: true,
+            guide_view: 0,
+            guide_drag_from: 0,
+            guide_base: Vec::new(),
+            guide_back: guide_back(0),
+            guide_query: String::new(),
+            guide_searching: false,
+            now_playing: None,
+            movie: None,
+            plays: 0,
+            handed: 0,
+            info_tx,
+            info_asked: HashMap::new(),
+            series: SeriesPanel::default(),
+            alternates: AlternatesPanel::default(),
+            mpv: None,
+            recordings_dir: settings.recordings_dir.clone(),
+            downloads_dir: settings.downloads_dir.clone(),
+            downloads_tab: false,
+            dl_asked: (String::new(), false),
+            record_after: i64::from(settings.record_after) * 60,
+            behind_timer: slint::Timer::default(),
+            rec_timer: slint::Timer::default(),
+            pos_timer: slint::Timer::default(),
+            next: None,
+            next_timer: slint::Timer::default(),
+            recent: Vec::new(),
+            clear_timer: slint::Timer::default(),
+            panel_timer: slint::Timer::default(),
+            stage_timer: slint::Timer::default(),
+            theme: None,
+            theme_timer: slint::Timer::default(),
+            later,
+            logos,
+            detail_logo: None,
+            shown_logos: HashSet::new(),
+            number: NumberEntry::default(),
+            query: String::new(),
+            searching: false,
+            wide: None,
+            search: search::Search::new(),
+            rebuild_index: Box::new(rebuild_index),
+            replaying: false,
+        })
+    });
+    screen.borrow_mut().watch_theme();
     if setup.is_none() {
         let s = screen.borrow();
         for kind in Kind::ALL {

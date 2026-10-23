@@ -335,6 +335,18 @@ pub struct Settings {
     pub record_before: u32,
     /// Minutes it runs past the guide's stop.
     pub record_after: u32,
+    pub theme: Theme,
+}
+
+/// Where the palette comes from (themes ticket 02).
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// The built-in dark palette.
+    #[default]
+    Default,
+    /// [`noctalia_palette_path`], watched.
+    Noctalia,
 }
 
 impl Default for Settings {
@@ -349,6 +361,7 @@ impl Default for Settings {
             ffmpeg_path: "ffmpeg".into(),
             record_before: 2,
             record_after: 5,
+            theme: Theme::Default,
         }
     }
 }
@@ -357,9 +370,15 @@ pub fn settings_path() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("vidicon/config.toml")
 }
 
+/// The palette Noctalia renders from Vidicon's template, beside
+/// `config.toml` (themes ticket 02).
+pub fn noctalia_palette_path() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join("vidicon/noctalia-palette.toml")
+}
+
 /// The keys `config.toml` may hold (SPEC 4.2), and the only ones the app
 /// writes.
-pub const SETTING_KEYS: [&str; 9] = [
+pub const SETTING_KEYS: [&str; 10] = [
     "active_provider",
     "refresh_hours",
     "mpv_path",
@@ -369,6 +388,7 @@ pub const SETTING_KEYS: [&str; 9] = [
     "ffmpeg_path",
     "record_before",
     "record_after",
+    "theme",
 ];
 
 pub fn load_settings(path: &Path) -> Result<Settings, String> {
@@ -1543,6 +1563,7 @@ mod tests {
         assert!(s.downloads_dir.ends_with("Vidicon/Downloads"));
         assert_eq!(s.ffmpeg_path, "ffmpeg");
         assert_eq!((s.record_before, s.record_after), (2, 5));
+        assert_eq!(s.theme, Theme::Default);
     }
 
     #[test]
@@ -1566,6 +1587,8 @@ mod tests {
         fs::write(&path, "mpv_pth = \"mpv\"\n").unwrap();
         assert!(load_settings(&path).unwrap_err().contains("mpv_pth"));
         fs::write(&path, "refresh_hours = 8\n").unwrap();
+        assert!(load_settings(&path).is_err());
+        fs::write(&path, "theme = \"nord\"\n").unwrap();
         assert!(load_settings(&path).is_err());
     }
 
@@ -1599,6 +1622,22 @@ mpv_path = \"/opt/mpv\"      # a newer build
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.ends_with("active_provider = \"spare\"\n"), "{text}");
         assert!(text.contains("# a newer build"), "{text}");
+    }
+
+    #[test]
+    fn the_theme_round_trips_through_saving() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        fs::write(&path, COMMENTED).unwrap();
+        let s = save_setting(&path, "theme", Some("noctalia".into())).unwrap();
+        assert_eq!(s.theme, Theme::Noctalia);
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text, format!("{COMMENTED}theme = \"noctalia\"\n"));
+        assert_eq!(load_settings(&path).unwrap().theme, Theme::Noctalia);
+        let s = save_setting(&path, "theme", Some("default".into())).unwrap();
+        assert_eq!(s.theme, Theme::Default);
+        assert!(save_setting(&path, "theme", Some("nord".into())).is_err());
+        assert_eq!(load_settings(&path).unwrap().theme, Theme::Default);
     }
 
     #[test]

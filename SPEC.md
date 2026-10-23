@@ -112,6 +112,7 @@ Single process, three concerns on separate threads:
 |---|---|
 | Settings | `$XDG_CONFIG_HOME/vidicon/config.toml` |
 | Credentials | `$XDG_CONFIG_HOME/vidicon/credentials.toml` (override: `--credentials <path>` or `VIDICON_CREDENTIALS`) |
+| Noctalia palette | `$XDG_CONFIG_HOME/vidicon/noctalia-palette.toml`, read with `theme = "noctalia"` (8.1) |
 | Database | `$XDG_DATA_HOME/vidicon/vidicon.db`, set `0600` on open: an M3U channel's URL can carry the account |
 | mpv socket | `$XDG_RUNTIME_DIR/vidicon/mpv.sock` |
 | Logs | stderr only in v1 |
@@ -303,6 +304,7 @@ downloads_dir = "/srv/films" # where d downloads (VOD ticket 10); default
 ffmpeg_path = "ffmpeg"      # records scheduled programmes (9.5)
 record_before = 2           # minutes a scheduled recording starts early
 record_after = 5            # and runs late
+theme = "default"           # or "noctalia" (8.1)
 ```
 
 Missing file means defaults. Unknown keys are an error (catches typos).
@@ -321,9 +323,11 @@ the Nix store, or read-only to the user (or in a directory that is), is
 managed: its values show, a note says why (`config.toml is managed by
 Nix; edit it there`, `config.toml is read-only to you, so nothing here
 saves`), and nothing saves. The app reads the file at start and after
-its own saves, never watching it. A saved value applies without a
-restart: `refresh_hours` re-arms every provider's check, run at once on
-the new age; `active_provider` is used from the next start.
+its own saves, never watching it; the one file it watches is the
+Noctalia palette (8.1). A saved value applies without a restart:
+`refresh_hours` re-arms every provider's check, run at once on the new
+age; `theme` re-colours the window; `active_provider` is used from the
+next start.
 
 Typed values are checked before they are written (settings ticket 02),
 a refusal naming why: `recordings_dir` and `downloads_dir` must be
@@ -1254,6 +1258,19 @@ build.
 Slint. Use `ListView` directly for every long list. Font: Inter, headings in
 Inter Display. Dark theme.
 
+Every colour comes from the `Palette` global, whose base tokens Rust
+sets (themes milestone, `docs/milestones/themes.md`); the translucent
+ones are derived from them. `theme = "default"` (4.2) is the built-in
+palette. `theme = "noctalia"` reads the palette file (Paths, 3), which
+Noctalia renders from Vidicon's template: TOML, `token = "#rrggbb"` per
+base token, named as in `Palette` (`bg`, `surface-2`, `logo-backing`).
+A token left out keeps its default; an unknown key is ignored. The app
+checks the file's mtime once a second while the theme is `noctalia` and
+applies a change live. A missing or unreadable file gives the default
+palette; a bad one (`noctalia-palette.toml: line 3: not a colour`)
+keeps the last good. Either way the Theme field in Settings says why
+(`No Noctalia palette at <path>`).
+
 Wayland app ids, for compositor window rules: `vidicon` for the app window,
 `vidicon-mpv` for the Player (9.1).
 
@@ -1708,9 +1725,11 @@ branch).
   04). General: Start with (`active_provider`),
   a picker of `Last used` and each provider by name, used from the next
   start; Refresh when older than (`refresh_hours`), a `12 h` / `6 h`
-  switch. Enter on the switch flips it; on the picker it opens its list
-  under the field, the saved entry ticked, where `j`/`k` move, Enter
-  chooses and Esc cancels. Each choice saves at once, no Save button. A
+  switch; Theme (`theme`), a `Default` / `Noctalia` switch, with why
+  the Noctalia palette is not in use under it (8.1). Enter on the
+  switch flips it; on the picker it opens its list under the field,
+  the saved entry ticked, where `j`/`k` move, Enter chooses and Esc
+  cancels. Each choice saves at once, no Save button. A
   save that fails says why under its field in amber, nothing written.
   Player (settings ticket 02): mpv (`mpv_path`) and Extra mpv arguments
   (`extra_mpv_args`, shown as its TOML array). Recording: Recordings

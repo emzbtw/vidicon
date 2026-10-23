@@ -81,6 +81,22 @@ black. `text` is not white, so deriving hover from it would change the
 default palette. A Noctalia
 template can still set `highlight` from `on_surface`.
 
+## Theme file (settled in ticket 02)
+
+- Path `$XDG_CONFIG_HOME/vidicon/noctalia-palette.toml`: beside
+  `config.toml`, not in a cache a clean-up would empty.
+- `token = "#rrggbb"` per base token, named as in `Palette`; unknown
+  keys ignored, missing ones from the default palette, a bad value or
+  TOML error named by line.
+- Watched by an mtime check once a second on a UI timer that runs only
+  while `theme` is `"noctalia"`, no new dependency
+  (`theme::Watched`). Noctalia writes the file by rename, so a read
+  never sees half a file. A parse failure keeps the last good palette;
+  a missing or unreadable file gives the default one. The reason shows
+  in amber under the field and clears on the next good read.
+- `theme` is the third field in General, a `Default` / `Noctalia`
+  switch like `refresh_hours`.
+
 ## Proposed (settle in the tickets)
 
 - Token mapping from Noctalia's Material 3 names: `bg` from `surface`,
@@ -95,12 +111,5 @@ template can still set `highlight` from `on_surface`.
   orange role. Check them against a few wallpapers.
 - `logo-backing` derived from `surface` (lighter by a fixed step), so
   white and dark logos both stay visible.
-- Watching by an mtime check once a second on the UI timer, no new
-  dependency. Noctalia writes the file by rename, so a read never sees
-  half a file; a parse failure keeps the last good palette.
-- Output path `$XDG_CONFIG_HOME/vidicon/noctalia-palette.toml`: beside
-  `config.toml`, not in a cache a clean-up would empty.
-- `theme` in the General section, a two-way choice like
-  `refresh_hours`.
 - Later: offer the template to Noctalia's community catalog so setup is
   one toggle in Noctalia's Templates settings.
