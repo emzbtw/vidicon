@@ -38,7 +38,11 @@ in a directory.
 - **A chosen user theme is watched** like Noctalia's file
   (`theme::Watched`, an mtime check once a second, only while it is the
   chosen theme), so editing it re-themes a running Vidicon. Built-ins
-  are not watched.
+  are not watched. (Amended 2026-10-23, after ticket 03's review: every
+  name's user file is watched, existing or not, so a file created after
+  the theme was chosen, or a tweaked built-in removed and copied again,
+  applies live; a built-in stands in for its user file when that is
+  missing or bad.)
 - **Settings:** the Theme field becomes a `Choice` picker: Default,
   Noctalia, the built-ins by name, then user themes by file stem, read
   from the directory when Settings opens. A palette applies when an

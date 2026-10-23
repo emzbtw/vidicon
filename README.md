@@ -307,16 +307,18 @@ shade = "#000000"        # what scrims and shadows darken with
 
 These are the default palette's colours. A colour left out keeps its
 default, so a file can set only `accent`. A bad line is named under the
-Theme field in Settings, and the palette stays as it was (the default
-one at start).
+Theme field in Settings, and the palette stays as it was (at start,
+the built-in of that name, or else the default).
 
 To change a built-in theme, copy its file from
 [`assets/themes/`](assets/themes/) to `~/.config/vidicon/themes/` under
 the same name and edit it: a user theme with a built-in's name replaces
 it. Each file names the source of every colour.
 
-While a user theme is chosen, Vidicon checks its file once a second, so
-an edit shows in the running window within a second of saving it.
+While a built-in or user theme is chosen, Vidicon checks for its
+file in `themes/` once a second. Saving, creating or removing the file
+shows in the running window within a second. Removing a copied
+built-in's file gives the built-in back.
 
 ### Noctalia
 

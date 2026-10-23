@@ -1279,9 +1279,11 @@ Any other value names a theme (built-in themes milestone,
 `themes/<name>.toml` (Paths, 3) first, then a built-in, so a user file
 with a built-in's name replaces it. A user theme is the same format,
 read and watched as the Noctalia file is (`No theme "<name>"` when it
-is missing), except that removing one with a built-in's name gives the
-built-in back; built-ins are not watched. An unknown name gives the
-default palette and the Theme field says `No theme "<name>"`.
+is missing). Every name's file is watched, whether or not it exists
+yet, so one created or removed while the app runs applies live. For a
+built-in's name, the built-in stands in for a missing or bad file
+instead of the default palette. An unknown name gives the default
+palette and the Theme field says `No theme "<name>"`.
 
 Wayland app ids, for compositor window rules: `vidicon` for the app window,
 `vidicon-mpv` for the Player (9.1).
