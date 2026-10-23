@@ -8,18 +8,24 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// A theme that ships with Vidicon: its name in `config.toml`, its label
-/// in the Theme picker and its file.
-type BuiltIn = (&'static str, &'static str, &'static str);
+/// A theme that ships with Vidicon.
+struct BuiltIn {
+    /// Its name in `config.toml`.
+    name: &'static str,
+    /// Its label in the Theme picker.
+    label: &'static str,
+    /// Its theme file.
+    text: &'static str,
+}
 
 /// A [`BuiltIn`] from `assets/themes/<name>.toml`.
 macro_rules! built_in {
     ($name:literal, $label:literal) => {
-        (
-            $name,
-            $label,
-            include_str!(concat!("../assets/themes/", $name, ".toml")),
-        )
+        BuiltIn {
+            name: $name,
+            label: $label,
+            text: include_str!(concat!("../assets/themes/", $name, ".toml")),
+        }
     };
 }
 
@@ -187,9 +193,9 @@ fn resolve(theme: &Theme, dir: &Path, built_in: &[BuiltIn]) -> Source {
         return Source::Unknown(missing);
     }
     let path = dir.join(format!("{name}.toml"));
-    match built_in.iter().find(|(n, ..)| n == name) {
+    match built_in.iter().find(|b| b.name == name) {
         // Ticket 02's test parses every built-in.
-        Some((.., text)) => Source::File(path, Palette::parse(text).unwrap_or_default(), None),
+        Some(b) => Source::File(path, Palette::parse(b.text).unwrap_or_default(), None),
         None => Source::File(path, Palette::default(), Some(missing)),
     }
 }
@@ -227,18 +233,14 @@ fn choices_in(dir: &Path, built_in: &[BuiltIn]) -> Vec<ThemeChoice> {
         })
         .filter(|stem| {
             matches!(Theme::from(stem.clone()), Theme::Named(_))
-                && !built_in.iter().any(|(n, ..)| n == stem)
+                && !built_in.iter().any(|b| b.name == stem)
         })
         .collect();
     user.sort();
     Theme::FIXED
         .iter()
         .map(|(_, name, label)| ThemeChoice::new(name, label))
-        .chain(
-            built_in
-                .iter()
-                .map(|(name, label, _)| ThemeChoice::new(name, label)),
-        )
+        .chain(built_in.iter().map(|b| ThemeChoice::new(b.name, b.label)))
         .chain(user.iter().map(|stem| ThemeChoice::new(stem, stem)))
         .collect()
 }
@@ -533,7 +535,7 @@ shade = \"#010101\"
             table.into_keys().collect()
         };
         assert_eq!(BUILT_IN.len(), 8);
-        for (name, _, text) in BUILT_IN {
+        for BuiltIn { name, text, .. } in BUILT_IN {
             assert_eq!(keys(text), keys(FULL), "{name}");
             assert!(Palette::parse(text).is_ok(), "{name}");
         }
@@ -560,7 +562,7 @@ shade = \"#010101\"
     /// The contrast floor in `docs/milestones/built-in-themes.md`.
     #[test]
     fn every_built_in_meets_the_contrast_floor() {
-        for (name, _, text) in BUILT_IN {
+        for BuiltIn { name, text, .. } in BUILT_IN {
             let p = Palette::parse(text).unwrap();
             for (ink, what, floor) in [
                 (p.text, "text", 7.0),
@@ -584,7 +586,11 @@ shade = \"#010101\"
     }
 
     /// A built-in for the tests, apart from the real list.
-    const TEST_BUILT_IN: &[BuiltIn] = &[("dusk", "Dusk", "bg = \"#202020\"\n")];
+    const TEST_BUILT_IN: &[BuiltIn] = &[BuiltIn {
+        name: "dusk",
+        label: "Dusk",
+        text: "bg = \"#202020\"\n",
+    }];
 
     fn named(name: &str) -> Theme {
         Theme::Named(name.into())
