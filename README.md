@@ -338,6 +338,9 @@ output_path = "~/.config/vidicon/noctalia-palette.toml"
   `/etc/profiles/per-user/<user>/share/vidicon/noctalia/vidicon.toml`
   from home-manager with `useUserPackages`, or
   `~/.nix-profile/share/vidicon/noctalia/vidicon.toml` from `nix profile`.
+  The first two need `environment.pathsToLink = [ "/share/vidicon" ];`
+  in the NixOS configuration: NixOS links only the listed directories
+  into those profiles.
 - **Tarball:** copy its `noctalia-template.toml` to `~/.config/vidicon/`
   and point at it there (not in `~/.config/noctalia/`, where Noctalia
   reads every `.toml` as its own config).
