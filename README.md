@@ -316,6 +316,8 @@ Vidicon is built on:
   fuzzy matching.
 - [tokio](https://tokio.rs) and [reqwest](https://github.com/seanmonstar/reqwest):
   the async runtime and HTTP.
+- [Noctalia](https://noctalia.dev): the palettes behind
+  `theme = "noctalia"`, rendered from Vidicon's template.
 
 `Cargo.lock` has the full list of dependencies.
 

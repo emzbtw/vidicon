@@ -14,3 +14,4 @@ whole milestone since the commit that planned it.
 | 01 | One palette for every colour | none |
 | 02 | Theme file and the `theme` setting | 01 |
 | 03 | Noctalia template, docs and screenshots | 02 |
+| 04 | Ship the Noctalia template in the packages | 03 |
