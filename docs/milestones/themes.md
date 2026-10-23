@@ -11,7 +11,7 @@ and colours taken from the wallpaper. It hands them to apps through
 templates it re-renders on every theme change. Taking Noctalia's palette
 gives Vidicon all three sources at once, so it comes before any palettes
 of Vidicon's own (Catppuccin, Gruvbox, Nord, Tokyo Night: a later
-milestone, in the same file format).
+milestone, in the same file format, `built-in-themes.md`).
 
 ## Requirements
 

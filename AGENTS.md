@@ -23,6 +23,8 @@ Built for one user first, may be published later. Licensed GPL-3.0-or-later
 - `.scratch/stream-recovery/`: stream recovery milestone tickets, same rules.
 - `.scratch/themes/`: themes milestone tickets (Noctalia palettes), same
   rules.
+- `.scratch/built-in-themes/`: built-in themes milestone tickets (eight
+  palettes and user themes), same rules.
 - `.scratch/refresh-panel/`, `.scratch/settings/`, `.scratch/onboarding/`,
   `.scratch/epg-sources/`: those milestones' tickets, same rules.
 - `.scratch/website/`: website milestone tickets (`site/`, Astro and
