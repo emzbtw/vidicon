@@ -2020,7 +2020,8 @@ movies, then series, each group its best 50, and the line under the bar
 counts each (`12 channels · 50 of 312 movies · 3 series`). A title row
 then says its kind (8.2, list rows). Enter keeps a widened filter as it keeps any other
 (VOD ticket 09). On a provider without movies and series (M3U ticket 04)
-Tab does nothing and the line under the bar does not offer it. Search filters the view's own keys, so in All it only finds
+Tab widens to All channels instead, every match best first, and the
+bar names that scope. Search filters the view's own keys, so in All it only finds
 channels of shown categories, and nowhere channels a channel rule or kept
 tags hide (5); the index keeps every name. At 50k channels an in-memory match over names takes 4 to 5 ms
 (prototype benchmark), so v1 keeps names in memory for matching (about a few

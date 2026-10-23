@@ -1185,7 +1185,7 @@ export component AppWindow inherits Window {
                                     padding-right: 12px;
                                     spacing: 8px;
                                     Text {
-                                        text: "/ " + query + (search-wide ? "  ·  all kinds" : "");
+                                        text: "/ " + query + (search-wide ? "  ·  " + search-scope.to-lowercase() : "");
                                         font-size: 13px;
                                         font-weight: 600;
                                         color: Palette.text;
@@ -1260,7 +1260,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 Text {
-                                    text: query != "" ? query + "▏" : "Search " + (search-wide ? "all kinds" : category-name) + "…";
+                                    text: query != "" ? query + "▏" : "Search " + (search-wide ? search-scope.to-lowercase() : category-name) + "…";
                                     font-size: 20px;
                                     color: query != "" ? Palette.text : Palette.dim;
                                     vertical-alignment: center;

@@ -227,7 +227,7 @@ guide, catch-up, movies and series.
 |---|---|
 | `j` `k` or arrows | Move |
 | `Enter` | Play |
-| `/` | Search (`Tab` widens it to movies and series) |
+| `/` | Search (`Tab` widens it to all channels, and to movies and series where there are any) |
 | `t` | Guide grid, or back to the list |
 | `f` | Favourite |
 | `-` | Last channel |

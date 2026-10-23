@@ -434,7 +434,7 @@ fn key_panel(caps: config::Capabilities) -> (Vec<KeyColumn>, Vec<KeyNote>) {
         .map(|(view, text)| {
             let text = match *view {
                 "Search" | "Manage" if !caps.vod => text
-                    .replace(" · Tab all kinds", "")
+                    .replace(" · Tab all kinds", " · Tab all channels")
                     .replace(" · Tab kind", ""),
                 _ => text.to_string(),
             };
@@ -4752,6 +4752,7 @@ struct Screen {
     searching: bool,
     /// Tab in search mode (VOD ticket 09): the filter is over each kind's
     /// All, not the category; their [`store::list_key`]s while it is.
+    /// Without movies and series, over All channels only.
     wide: Option<Vec<i64>>,
     /// Names for search, a kind's index from when it is built until an
     /// import of that kind, which replaces the row keys.
@@ -4852,11 +4853,17 @@ impl Screen {
         self.load_view(true)
     }
 
-    /// Each kind's All, which a widened search filters (VOD ticket 09).
+    /// Each kind's All, which a widened search filters (VOD ticket 09);
+    /// without movies and series, All channels.
     fn wide_views(&self) -> Result<Vec<i64>, String> {
         let t = Instant::now();
         let mut keys = Vec::new();
-        for kind in Kind::ALL {
+        let kinds: &[Kind] = if self.caps().vod {
+            &Kind::ALL
+        } else {
+            &[Kind::Live]
+        };
+        for &kind in kinds {
             let all = Category::All(kind)
                 .keys(&self.conn, &self.provider().id, self.order)
                 .map_err(|e| format!("reading {}: {e}", noun(kind)))?;
@@ -4978,6 +4985,7 @@ impl Screen {
         );
         let scope = if mixed { cat.name() } else { kind_name(kind) };
         let wide = self.wide.is_some() && !self.query.is_empty();
+        let vod = self.caps().vod;
         // In a widened search, how many each kind found.
         let mut found_by_kind = Vec::new();
         let keys = if self.query.is_empty() {
@@ -4998,11 +5006,14 @@ impl Screen {
             self.base.clone()
         } else {
             let t = Instant::now();
+            // Without movies and series, every channel that matches.
+            let cap = if vod { WIDE_CAP } else { usize::MAX };
             let (found, of) = match &self.wide {
                 Some(all) => (
-                    self.search.widen(all, &self.query, WIDE_CAP).map(|groups| {
+                    self.search.widen(all, &self.query, cap).map(|groups| {
                         groups
                             .into_iter()
+                            .filter(|g| vod || g.kind == Kind::Live)
                             .flat_map(|g| {
                                 found_by_kind.push(match g.total {
                                     n if n > g.keys.len() => {
@@ -5035,6 +5046,7 @@ impl Screen {
                         t.elapsed().as_micros()
                     );
                     let hint = match wide {
+                        true if !vod => "No matches in All channels.".to_string(),
                         true => "No matches in any kind.".to_string(),
                         false => format!("No matches in {}.", cat.name()),
                     };
@@ -5067,7 +5079,7 @@ impl Screen {
         let keep = "Enter keeps the filter  ·  Esc clears it";
         w.set_search_scope(
             if self.wide.is_some() {
-                "All kinds"
+                if vod { "All kinds" } else { "All channels" }
             } else {
                 scope
             }
@@ -5077,13 +5089,19 @@ impl Screen {
         w.set_search_hint(
             match (&self.wide, found_by_kind.is_empty()) {
                 (Some(_), false) => format!(
-                    "{}  ·  Tab: {scope} only  ·  {keep}",
-                    found_by_kind.join("  ·  ")
+                    "{}  ·  Tab: {} only  ·  {keep}",
+                    found_by_kind.join("  ·  "),
+                    if vod { scope } else { cat.name() }
                 ),
+                (Some(_), true) if !vod => {
+                    format!("in All channels  ·  Tab: {} only  ·  {keep}", cat.name())
+                }
                 (Some(_), true) => {
                     format!("in Live, Movies and Series  ·  Tab: {scope} only  ·  {keep}")
                 }
-                (None, _) if !self.caps().vod => format!("in {}  ·  {keep}", cat.name()),
+                (None, _) if !vod => {
+                    format!("in {}  ·  Tab: all channels  ·  {keep}", cat.name())
+                }
                 (None, _) => format!("in {}  ·  Tab: all kinds  ·  {keep}", cat.name()),
             }
             .into(),
@@ -11172,10 +11190,7 @@ impl Screen {
             }
         } else if self.searching {
             if text.chars().eq([char::from(slint::platform::Key::Tab)]) {
-                // Movies and series are what widening adds.
-                if self.caps().vod {
-                    self.toggle_wide();
-                }
+                self.toggle_wide();
                 return true;
             }
             match search_key(text, ctrl) {
@@ -14569,6 +14584,7 @@ mod tests {
         assert!(!has(&panel, "Tab ⇧Tab"));
         assert!(rows(&panel).contains(&("c".into(), "Clear Recently played (twice)".into())));
         assert!(panel.1.iter().all(|n| !n.text.contains("Tab all kinds")));
+        assert!(panel.1.iter().any(|n| n.text.contains("Tab all channels")));
         assert!(panel.1.iter().all(|n| !n.text.contains("Tab kind")));
         for a in [
             Action::Cycle(1),
