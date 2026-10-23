@@ -25,3 +25,7 @@ Glossary for Vidicon, an IPTV player. Terms only; decisions go in `docs/adr/`.
 - **Continue watching**: the movies part way through and each series' next episode, latest first.
 - **Download**: a movie or episode saved to disk to play later, unlike a recording, which captures live TV as it airs.
 - **Catch-up**: playing a programme that has already aired, or the one airing now from its start, from the channel's archive. Not live, so going live returns to the live stream.
+- **Palette**: the set of colours the app draws with, one for each role (background, text, accent, warnings and so on).
+- **Theme**: a named palette the user picks: the default, Noctalia's (taken from Noctalia's scheme or wallpaper), a built-in theme or a user theme. Not "colour scheme", which is Noctalia's word for its own.
+- **Built-in theme**: a theme that ships with the app, the dark variant of a published palette such as Nord or Gruvbox.
+- **User theme**: a theme the user writes as a file in the themes folder. One with a built-in theme's name replaces that built-in.
