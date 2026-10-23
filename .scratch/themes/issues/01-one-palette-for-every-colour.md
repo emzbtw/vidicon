@@ -1,6 +1,6 @@
 # 01: One palette for every colour
 
-Status: open. Blocked by: none.
+Status: done. Blocked by: none.
 
 ## Goal
 
@@ -30,11 +30,11 @@ at the top, the literals throughout), `src/ui.rs`.
 
 ## Acceptance
 
-- [ ] No colour literal left in `ui/app.slint` outside `Palette`.
-- [ ] Screenshots of every view (main, search, guide grid, settings,
+- [x] No colour literal left in `ui/app.slint` outside `Palette`.
+- [x] Screenshots of every view (main, search, guide grid, settings,
   dashboard, recordings, VOD, the refresh panel) match the ones taken
   before the change, against the demo provider.
-- [ ] Test: applying a palette with a changed `bg` changes
+- [x] Test: applying a palette with a changed `bg` changes
   `Palette.bg` as read back from the window.
 
 ## Out of scope

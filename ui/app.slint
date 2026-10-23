@@ -144,22 +144,41 @@ export struct AccountView {
     protocol: string,
 }
 
-global Palette {
-    out property <color> bg: #0e1014;
-    out property <color> surface: #151920;
-    out property <color> surface-2: #1c212a;
-    out property <color> line: #262c37;
-    out property <color> text: #e7e9ee;
-    out property <color> dim: #8b93a4;
-    out property <color> accent: #7c9cff;
-    out property <color> accent-dim: #7c9cff2e;
-    out property <color> warn: #e8a86b;
-    out property <color> danger: #ef6b6b;
-    out property <color> danger-dim: #ef6b6b2e;
-    out property <color> star: #f2c14e;
-    out property <color> ok: #6fcf97;
+// Every colour in this file. Rust sets the base tokens (`theme.rs`, themes
+// ticket 01); the rest are derived from them with fixed alphas, so a theme
+// never has to get an alpha right.
+export global Palette {
+    in-out property <color> bg: #0e1014;
+    in-out property <color> surface: #151920;
+    in-out property <color> surface-2: #1c212a;
+    in-out property <color> line: #262c37;
+    in-out property <color> text: #e7e9ee;
+    in-out property <color> dim: #8b93a4;
+    // Icons at rest and unselected season labels.
+    in-out property <color> icon: #c9cedb;
+    in-out property <color> accent: #7c9cff;
+    in-out property <color> warn: #e8a86b;
+    in-out property <color> danger: #ef6b6b;
+    in-out property <color> star: #f2c14e;
+    in-out property <color> ok: #6fcf97;
     // Behind logos: mid grey, so white and dark logos both stay visible.
-    out property <color> logo-backing: #3a404c;
+    in-out property <color> logo-backing: #3a404c;
+    // Lightens what is under it: hover, press, initials on a logo tile.
+    in-out property <color> highlight: #ffffff;
+    // Darkens what is under it: modal scrims, drop shadows.
+    in-out property <color> shade: #000000;
+
+    out property <color> accent-dim: accent.with-alpha(46 / 255);
+    out property <color> danger-dim: danger.with-alpha(46 / 255);
+    out property <color> star-tint: star.with-alpha(34 / 255);
+    out property <color> ok-tint: ok.with-alpha(34 / 255);
+    out property <color> danger-tint: danger.with-alpha(34 / 255);
+    out property <color> warn-tint: warn.with-alpha(31 / 255);
+    out property <color> hover: highlight.with-alpha(15 / 255);
+    out property <color> pressed: highlight.with-alpha(26 / 255);
+    out property <color> initials: highlight.with-alpha(230 / 255);
+    out property <color> scrim: shade.with-alpha(153 / 255);
+    out property <color> shadow: shade.with-alpha(136 / 255);
 }
 
 component Progress inherits Rectangle {
@@ -201,7 +220,7 @@ component LogoTile inherits Rectangle {
         font-family: "Inter Display";
         font-size: poster ? size * 0.26 : size * 0.36;
         font-weight: 700;
-        color: #ffffffe6;
+        color: Palette.initials;
     }
 }
 
@@ -219,7 +238,7 @@ component IconButton inherits Rectangle {
     width: 40px;
     height: 34px;
     border-radius: 8px;
-    background: on ? on-fill : area.pressed ? #ffffff1a : area.has-hover ? #ffffff0f : transparent;
+    background: on ? on-fill : area.pressed ? Palette.pressed : area.has-hover ? Palette.hover : transparent;
     area := TouchArea {
         enabled: !dimmed;
         mouse-cursor: dimmed ? MouseCursor.default : MouseCursor.pointer;
@@ -229,7 +248,7 @@ component IconButton inherits Rectangle {
         source: icon;
         width: 18px;
         height: 18px;
-        colorize: on ? on-ink : area.has-hover ? Palette.text : #c9cedb;
+        colorize: on ? on-ink : area.has-hover ? Palette.text : Palette.icon;
         opacity: dimmed ? 0.3 : 1;
     }
 }
@@ -1023,7 +1042,7 @@ export component AppWindow inherits Window {
                                 border-radius: 12px;
                                 border-width: 1px;
                                 border-color: filtering ? Palette.accent : Palette.line;
-                                background: manage-area.pressed ? #ffffff1a : manage-area.has-hover ? #ffffff0f : transparent;
+                                background: manage-area.pressed ? Palette.pressed : manage-area.has-hover ? Palette.hover : transparent;
                                 manage-area := TouchArea {
                                     mouse-cursor: MouseCursor.pointer;
                                     clicked => { open-manage(); }
@@ -1043,7 +1062,7 @@ export component AppWindow inherits Window {
                                 border-radius: 12px;
                                 border-width: 1px;
                                 border-color: order-az ? Palette.accent : Palette.line;
-                                background: order-area.pressed ? #ffffff1a : order-area.has-hover ? #ffffff0f : transparent;
+                                background: order-area.pressed ? Palette.pressed : order-area.has-hover ? Palette.hover : transparent;
                                 order-area := TouchArea {
                                     mouse-cursor: MouseCursor.pointer;
                                     clicked => { toggle-order(); }
@@ -1092,7 +1111,7 @@ export component AppWindow inherits Window {
                                     horizontal-stretch: 1;
                                     border-radius: 6px;
                                     background: i == library-kind ? Palette.accent-dim
-                                        : kind-switch-area.has-hover ? #ffffff0f : transparent;
+                                        : kind-switch-area.has-hover ? Palette.hover : transparent;
                                     kind-switch-area := TouchArea {
                                         mouse-cursor: MouseCursor.pointer;
                                         clicked => { select-kind(i); }
@@ -1207,7 +1226,7 @@ export component AppWindow inherits Window {
                                 border-radius: 14px;
                                 border-width: 1px;
                                 border-color: clear-armed ? Palette.warn : Palette.line;
-                                background: clear-area.pressed ? #ffffff1a : clear-area.has-hover ? #ffffff0f : transparent;
+                                background: clear-area.pressed ? Palette.pressed : clear-area.has-hover ? Palette.hover : transparent;
                                 clear-area := TouchArea {
                                     mouse-cursor: MouseCursor.pointer;
                                     clicked => { clear-history(); }
@@ -1403,7 +1422,7 @@ export component AppWindow inherits Window {
                                     border-width: 1px;
                                     border-color: i == manage-kind ? Palette.accent : Palette.line;
                                     background: i == manage-kind ? Palette.accent-dim
-                                        : kind-area.has-hover ? #ffffff0f : transparent;
+                                        : kind-area.has-hover ? Palette.hover : transparent;
                                     kind-area := TouchArea {
                                         mouse-cursor: MouseCursor.pointer;
                                         clicked => { manage-select-kind(i); }
@@ -1432,7 +1451,7 @@ export component AppWindow inherits Window {
                                 border-radius: 14px;
                                 border-width: 1px;
                                 border-color: Palette.line;
-                                background: done-area.pressed ? #ffffff1a : done-area.has-hover ? #ffffff0f : transparent;
+                                background: done-area.pressed ? Palette.pressed : done-area.has-hover ? Palette.hover : transparent;
                                 done-area := TouchArea {
                                     mouse-cursor: MouseCursor.pointer;
                                     clicked => { close-manage(); }
@@ -1538,7 +1557,7 @@ export component AppWindow inherits Window {
                                     border-radius: 14px;
                                     border-width: 1px;
                                     border-color: Palette.accent;
-                                    background: action-area.pressed ? #ffffff1a : action-area.has-hover ? #ffffff0f : transparent;
+                                    background: action-area.pressed ? Palette.pressed : action-area.has-hover ? Palette.hover : transparent;
                                     action-area := TouchArea {
                                         mouse-cursor: MouseCursor.pointer;
                                         clicked => { manage-rule(); }
@@ -1640,7 +1659,7 @@ export component AppWindow inherits Window {
                                     border-radius: 14px;
                                     border-width: 1px;
                                     border-color: Palette.line;
-                                    background: name-action-area.pressed ? #ffffff1a : name-action-area.has-hover ? #ffffff0f : transparent;
+                                    background: name-action-area.pressed ? Palette.pressed : name-action-area.has-hover ? Palette.hover : transparent;
                                     name-action-area := TouchArea {
                                         mouse-cursor: MouseCursor.pointer;
                                         clicked => { manage-name-rule(); }
@@ -1743,7 +1762,7 @@ export component AppWindow inherits Window {
                                     border-radius: 14px;
                                     border-width: 1px;
                                     border-color: Palette.line;
-                                    background: kept-action-area.pressed ? #ffffff1a : kept-action-area.has-hover ? #ffffff0f : transparent;
+                                    background: kept-action-area.pressed ? Palette.pressed : kept-action-area.has-hover ? Palette.hover : transparent;
                                     kept-action-area := TouchArea {
                                         mouse-cursor: MouseCursor.pointer;
                                         clicked => { manage-kept-tag(); }
@@ -1794,7 +1813,7 @@ export component AppWindow inherits Window {
                                             border-radius: 13px;
                                             border-width: 1px;
                                             border-color: m.shown ? Palette.accent : Palette.line;
-                                            background: pill-area.has-hover ? #ffffff0f : transparent;
+                                            background: pill-area.has-hover ? Palette.hover : transparent;
                                             pill-area := TouchArea {
                                                 mouse-cursor: MouseCursor.pointer;
                                                 clicked => { manage-toggle(i); }
@@ -1892,7 +1911,7 @@ export component AppWindow inherits Window {
                                     if detail-favourite : Chip {
                                         text: "★ Favourite";
                                         ink: Palette.star;
-                                        fill: #f2c14e22;
+                                        fill: Palette.star-tint;
                                     }
                                     if detail-format != "" : Chip {
                                         text: detail-format;
@@ -2081,7 +2100,7 @@ export component AppWindow inherits Window {
                                             text: name;
                                             font-size: 13px;
                                             font-weight: 500;
-                                            color: i == detail-season ? Palette.accent : #c9cedb;
+                                            color: i == detail-season ? Palette.accent : Palette.icon;
                                         }
                                     }
                                 }
@@ -2996,7 +3015,7 @@ export component AppWindow inherits Window {
         }
         // `p`: the provider picker, over everything.
         if picking : Rectangle {
-            background: #0009;
+            background: Palette.scrim;
             TouchArea {
                 clicked => { close-picker(); }
             }
@@ -3109,7 +3128,7 @@ export component AppWindow inherits Window {
             border-color: Palette.line;
             background: Palette.surface;
             drop-shadow-blur: 16px;
-            drop-shadow-color: #0008;
+            drop-shadow-color: Palette.shadow;
             // Clicks on the card do not reach the list under it.
             TouchArea {}
             stages-body := VerticalLayout {
@@ -3187,7 +3206,7 @@ export component AppWindow inherits Window {
         }
         // `i` or the status bar's account: the account dashboard.
         if account-open : Rectangle {
-            background: #0009;
+            background: Palette.scrim;
             TouchArea {
                 clicked => { close-account(); }
             }
@@ -3228,7 +3247,7 @@ export component AppWindow inherits Window {
                             Chip {
                                 text: "● " + account.status;
                                 ink: account.ok ? Palette.ok : Palette.danger;
-                                fill: account.ok ? #6fcf9722 : #ef6b6b22;
+                                fill: account.ok ? Palette.ok-tint : Palette.danger-tint;
                             }
                         }
                         VerticalLayout {
@@ -3349,7 +3368,7 @@ export component AppWindow inherits Window {
         // empty while closed.
         Rectangle {
             visible: recordings-open;
-            background: #0009;
+            background: Palette.scrim;
             TouchArea {
                 clicked => { close-recordings(); }
             }
@@ -3384,7 +3403,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             border-radius: 6px;
                                             background: i == recordings-tab ? Palette.accent-dim
-                                                : tab-area.has-hover ? #ffffff0f : transparent;
+                                                : tab-area.has-hover ? Palette.hover : transparent;
                                             tab-area := TouchArea {
                                                 mouse-cursor: MouseCursor.pointer;
                                                 clicked => { recordings-select-tab(i); }
@@ -3420,7 +3439,7 @@ export component AppWindow inherits Window {
                                 border-radius: 14px;
                                 border-width: 1px;
                                 border-color: recordings-clear-armed ? Palette.warn : Palette.line;
-                                background: recordings-clear-area.pressed ? #ffffff1a : recordings-clear-area.has-hover ? #ffffff0f : transparent;
+                                background: recordings-clear-area.pressed ? Palette.pressed : recordings-clear-area.has-hover ? Palette.hover : transparent;
                                 recordings-clear-area := TouchArea {
                                     mouse-cursor: MouseCursor.pointer;
                                     clicked => { clear-recordings(); }
@@ -3545,7 +3564,7 @@ export component AppWindow inherits Window {
             // The setup screen's logo above the card, as on the first-run
             // screen, and the card only as tall as what it holds.
             property <length> logo-space: setup-open ? 112px + 14px : 0px;
-            background: setup-open ? Palette.bg : #0009;
+            background: setup-open ? Palette.bg : Palette.scrim;
             TouchArea {
                 clicked => { close-settings(); }
             }
@@ -3617,7 +3636,7 @@ export component AppWindow inherits Window {
                     if settings-note != "" : Rectangle {
                         height: 36px;
                         border-radius: 8px;
-                        background: #e8a86b1f;
+                        background: Palette.warn-tint;
                         HorizontalLayout {
                             padding-left: 12px;
                             padding-right: 12px;
@@ -3640,7 +3659,7 @@ export component AppWindow inherits Window {
                             for section[i] in settings-sections : Rectangle {
                                 height: 34px;
                                 border-radius: 8px;
-                                background: i != settings-section ? (section-area.has-hover ? #ffffff0f : transparent)
+                                background: i != settings-section ? (section-area.has-hover ? Palette.hover : transparent)
                                     : settings-in-fields ? Palette.surface-2 : Palette.accent-dim;
                                 border-width: i == settings-section && !settings-in-fields ? 1px : 0px;
                                 border-color: Palette.accent;
@@ -3839,7 +3858,7 @@ export component AppWindow inherits Window {
                                                             horizontal-stretch: 1;
                                                             border-radius: 6px;
                                                             background: j == field.chosen ? Palette.accent-dim
-                                                                : option-area.has-hover ? #ffffff0f : transparent;
+                                                                : option-area.has-hover ? Palette.hover : transparent;
                                                             option-area := TouchArea {
                                                                 mouse-cursor: MouseCursor.pointer;
                                                                 clicked => { settings-choose(i, j); }
@@ -3894,7 +3913,7 @@ export component AppWindow inherits Window {
                                                 height: 30px;
                                                 border-radius: 6px;
                                                 background: j == settings-choosing ? Palette.accent-dim
-                                                    : choice-area.has-hover ? #ffffff0f : transparent;
+                                                    : choice-area.has-hover ? Palette.hover : transparent;
                                                 choice-area := TouchArea {
                                                     mouse-cursor: MouseCursor.pointer;
                                                     clicked => { settings-choose(i, j); }
@@ -3943,7 +3962,7 @@ export component AppWindow inherits Window {
                                                 border-radius: 6px;
                                                 border-width: 1px;
                                                 border-color: Palette.warn;
-                                                background: create-area.has-hover ? #e8a86b1f : transparent;
+                                                background: create-area.has-hover ? Palette.warn-tint : transparent;
                                                 create-area := TouchArea {
                                                     mouse-cursor: MouseCursor.pointer;
                                                     clicked => { settings-button(); }
@@ -3969,7 +3988,7 @@ export component AppWindow inherits Window {
         // `show-card-selected` can reach its list.
         Rectangle {
             visible: card-open;
-            background: #0009;
+            background: Palette.scrim;
             TouchArea {
                 clicked => { close-card(); }
             }
@@ -4079,7 +4098,7 @@ export component AppWindow inherits Window {
                                         border-radius: 14px;
                                         border-width: 1px;
                                         border-color: Palette.line;
-                                        background: card-action-area.pressed ? #ffffff1a : card-action-area.has-hover ? #ffffff0f : transparent;
+                                        background: card-action-area.pressed ? Palette.pressed : card-action-area.has-hover ? Palette.hover : transparent;
                                         card-action-area := TouchArea {
                                             mouse-cursor: MouseCursor.pointer;
                                             clicked => { card-action(i); }
@@ -4103,7 +4122,7 @@ export component AppWindow inherits Window {
         // `scroll-keys` can reach its Flickable.
         Rectangle {
             visible: keys-open;
-            background: #0009;
+            background: Palette.scrim;
             TouchArea {
                 clicked => { close-keys(); }
             }

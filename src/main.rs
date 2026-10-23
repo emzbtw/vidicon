@@ -17,6 +17,7 @@ mod refresh;
 mod search;
 mod store;
 mod tables;
+mod theme;
 mod trash;
 mod ts;
 mod ui;

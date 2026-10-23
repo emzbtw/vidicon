@@ -56,6 +56,31 @@ milestone, in the same file format).
   milestone.
 - SPEC 4.2 and 8.1 updated; README and site gain a Themes section.
 
+## Tokens (settled in ticket 01)
+
+Base tokens, which Rust sets (`src/theme.rs`) and a theme file will
+name: `bg`, `surface`, `surface-2`, `line`, `text`, `dim`, `icon` (icons
+at rest, season labels), `accent`, `warn`, `danger`, `star`, `ok`,
+`logo-backing`, `highlight` (white: what hover and press lighten with)
+and `shade` (black: what scrims and shadows darken with).
+
+Derived in `ui/app.slint` by `.with-alpha()`, each the exact literal it
+replaced:
+
+| Token | From | Alpha |
+|---|---|---|
+| `accent-dim`, `danger-dim` | `accent`, `danger` | 0x2e |
+| `star-tint`, `ok-tint`, `danger-tint` | `star`, `ok`, `danger` | 0x22 |
+| `warn-tint` | `warn` | 0x1f |
+| `hover`, `pressed` | `highlight` | 0x0f, 0x1a |
+| `initials` (on a logo tile) | `highlight` | 0xe6 |
+| `scrim`, `shadow` | `shade` | 0x99, 0x88 |
+
+`highlight` and `shade` are base tokens, not derived from `text` and
+black. `text` is not white, so deriving hover from it would change the
+default palette. A Noctalia
+template can still set `highlight` from `on_surface`.
+
 ## Proposed (settle in the tickets)
 
 - Token mapping from Noctalia's Material 3 names: `bg` from `surface`,

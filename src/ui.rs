@@ -15,6 +15,7 @@ use crate::store::{
     TitleView, UpNext, View, Watchable,
 };
 use crate::tables;
+use crate::theme;
 use crate::xtream::{self, Blocked, Client};
 use rusqlite::Connection;
 use slint::{ComponentHandle, Model, ModelNotify, ModelRc, ModelTracker, VecModel};
@@ -11599,6 +11600,7 @@ pub fn run(
         });
     }
     let window = AppWindow::new().map_err(|e| e.to_string())?;
+    theme::Palette::default().apply(&window);
     // Wayland app id for compositor window rules; mpv's is `vidicon-mpv`.
     // Must be set before the window is shown.
     slint::set_xdg_app_id("vidicon").map_err(|e| e.to_string())?;
