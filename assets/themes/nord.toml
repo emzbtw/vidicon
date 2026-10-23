@@ -1,0 +1,24 @@
+# Nord, a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/nordtheme/nord (src/nord.css)
+# Licence: MIT, Copyright (c) 2016-present Sven Greb.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#2e3440"           # nord0
+surface = "#3b4252"      # nord1
+surface-2 = "#434c5e"    # nord2
+line = "#4c566a"         # nord3
+text = "#eceff4"         # nord6
+dim = "#d8dee9"          # nord4
+icon = "#e5e9f0"         # nord5
+accent = "#88c0d0"       # nord8
+warn = "#ebcb8b"         # nord13
+danger = "#d08770"       # nord12
+star = "#ebcb8b"         # nord13
+ok = "#a3be8c"           # nord14
+logo-backing = "#4c566a" # nord3
+highlight = "#eceff4"    # nord6
+shade = "#2e3440"        # nord0

@@ -1,0 +1,25 @@
+# Everforest Dark (medium), a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/sainnhe/everforest (palette.md), medium contrast;
+#   bg and shade from the hard contrast, so text stays above 7:1.
+# Licence: MIT, Copyright (c) 2019 sainnhe.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#1e2326"           # bg_dim (hard)
+surface = "#232a2e"      # bg_dim
+surface-2 = "#2d353b"    # bg0
+line = "#3d484d"         # bg2
+text = "#d3c6aa"         # fg
+dim = "#9da9a0"          # grey2
+icon = "#9da9a0"         # grey2
+accent = "#7fbbb3"       # blue
+warn = "#e69875"         # orange
+danger = "#e67e80"       # red
+star = "#dbbc7f"         # yellow
+ok = "#a7c080"           # green
+logo-backing = "#4f585e" # bg4
+highlight = "#d3c6aa"    # fg
+shade = "#1e2326"        # bg_dim (hard)

@@ -1,0 +1,25 @@
+# Dracula, a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/dracula/spec (dracula-spec.md)
+#   https://github.com/dracula/visual-studio-code (src/dracula.yml, the UI variants)
+# Licence: MIT, Copyright (c) 2016, 2020 Dracula Theme.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#21222c"           # BGDark
+surface = "#282a36"      # Background
+surface-2 = "#343746"    # BGLight
+line = "#424450"         # BGLighter
+text = "#ffffff"         # AnsiBrightWhite
+dim = "#f8f8f2"          # Foreground
+icon = "#f8f8f2"         # Foreground
+accent = "#bd93f9"       # Purple
+warn = "#ffb86c"         # Orange
+danger = "#ff5555"       # Red
+star = "#f1fa8c"         # Yellow
+ok = "#50fa7b"           # Green
+logo-backing = "#44475a" # Selection
+highlight = "#f8f8f2"    # Foreground
+shade = "#191a21"        # BGDarker

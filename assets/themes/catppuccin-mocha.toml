@@ -1,0 +1,24 @@
+# Catppuccin Mocha, a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/catppuccin/palette (palette.json)
+# Licence: MIT, Copyright (c) 2021 Catppuccin.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#11111b"           # crust
+surface = "#181825"      # mantle
+surface-2 = "#1e1e2e"    # base
+line = "#313244"         # surface0
+text = "#cdd6f4"         # text
+dim = "#9399b2"          # overlay2
+icon = "#bac2de"         # subtext1
+accent = "#cba6f7"       # mauve
+warn = "#fab387"         # peach
+danger = "#f38ba8"       # red
+star = "#f9e2af"         # yellow
+ok = "#a6e3a1"           # green
+logo-backing = "#45475a" # surface1
+highlight = "#cdd6f4"    # text
+shade = "#11111b"        # crust

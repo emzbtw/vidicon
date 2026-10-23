@@ -53,3 +53,94 @@ in a directory.
 
 Light themes and light variants. A theme editor in the app. Picker
 live preview. Changing the Noctalia template.
+
+## Palettes (settled in ticket 02)
+
+Each file in `assets/themes/` names its source and licence in its
+header, and the source palette's name for each colour beside it.
+Sources, fetched 2026-10-23: `catppuccin/palette` (`palette.json`),
+`dracula/spec` and `dracula/visual-studio-code` (its UI shades),
+`sainnhe/everforest` (`palette.md`), `morhetz/gruvbox`
+(`colors/gruvbox.vim`), `rebelot/kanagawa.nvim`, `nordtheme/nord`
+(`src/nord.css`), `rose-pine/neovim` (`palette.lua`) and
+`folke/tokyonight.nvim` (`colors/night.lua` over `storm.lua`). All MIT
+but Tokyo Night (Apache-2.0).
+
+| Token | Catppuccin Mocha | Dracula | Everforest Dark | Gruvbox Dark |
+|---|---|---|---|---|
+| `bg` | crust | BGDark | bg_dim (hard) | dark0 |
+| `surface` | mantle | Background | bg_dim | dark0_soft |
+| `surface-2` | base | BGLight | bg0 | dark1 |
+| `line` | surface0 | BGLighter | bg2 | dark2 |
+| `logo-backing` | surface1 | Selection | bg4 | dark3 |
+| `text` | text | AnsiBrightWhite | fg | light1 |
+| `dim` | overlay2 | Foreground | grey2 | light3 |
+| `icon` | subtext1 | Foreground | grey2 | light2 |
+| `accent` | mauve | Purple | blue | bright_blue |
+| `warn` | peach | Orange | orange | bright_orange |
+| `danger` | red | Red | red | bright_red |
+| `star` | yellow | Yellow | yellow | bright_yellow |
+| `ok` | green | Green | green | bright_green |
+| `highlight` | text | Foreground | fg | light1 |
+| `shade` | crust | BGDarker | bg_dim (hard) | dark0_hard |
+
+| Token | Kanagawa Wave | Nord | Rosé Pine | Tokyo Night |
+|---|---|---|---|---|
+| `bg` | sumiInk1 | nord0 | base | bg_dark |
+| `surface` | sumiInk3 | nord1 | surface | bg |
+| `surface-2` | sumiInk4 | nord2 | overlay | bg_highlight |
+| `line` | sumiInk5 | nord3 | highlight_med | fg_gutter |
+| `logo-backing` | sumiInk6 | nord3 | highlight_high | terminal_black |
+| `text` | fujiWhite | nord6 | text | fg |
+| `dim` | springViolet2 | nord4 | subtle | fg_dark |
+| `icon` | oldWhite | nord5 | subtle | fg_dark |
+| `accent` | crystalBlue | nord8 | iris | blue |
+| `warn` | roninYellow | nord13 | gold | orange |
+| `danger` | samuraiRed | nord12 | love | red |
+| `star` | carpYellow | nord13 | gold | yellow |
+| `ok` | springGreen | nord14 | foam | green |
+| `highlight` | fujiWhite | nord6 | text | fg |
+| `shade` | sumiInk0 | nord0 | base | bg_dark1 |
+
+- **Surfaces** follow the default palette: `bg` darkest, then
+  `surface` and `surface-2` a step lighter each, `line` and
+  `logo-backing` above them. Where a family names a main background
+  (Dracula's Background, Kanagawa's and Tokyo Night's `bg`), it is
+  `surface`, with the darker sidebar shade as `bg`.
+- **`warn`** is the family's orange and `star` its yellow, as in the
+  default palette. Nord and Rosé Pine have no orange; both are the
+  family's warning yellow (nord13, gold). Kanagawa's is roninYellow,
+  its warning colour, which is orange (surimiOrange is for constants).
+- **`ok`** is Rosé Pine's foam, its colour for added lines; it has no
+  green.
+- **`highlight`** is the family's text colour, as in the Noctalia
+  template; **`shade`** its darkest background. Nord's darkest is
+  nord0, its `bg`, so a scrim darkens the side panes and cards but not
+  the centre; dialogs still stand apart by their surface and line.
+
+Contrast floor (`theme::tests::every_built_in_meets_the_contrast_floor`):
+the worst cases are Nord's `danger` 3.0:1, Kanagawa's 3.2, Gruvbox's
+3.4, Everforest's `text` 7.4 and `danger` 4.5, Rosé Pine's `dim` 4.7.
+
+Changes from each family's own choice, and why:
+
+- **Everforest `bg`** is bg_dim of the hard contrast. On medium bg1,
+  `text` (fg) is 6.4:1; the surfaces moved one step darker, which
+  needs a shade below medium's bg_dim.
+- **Gruvbox `dim`** is light3, not gray or light4: light4 is 4.2:1 on
+  dark1.
+- **Kanagawa `dim`** is springViolet2: fujiGray (comments) is 2.9:1
+  and springViolet1 4.3 on sumiInk4.
+- **Tokyo Night `dim`** is fg_dark: comment and dark5 are 2.2 and
+  3.2:1 on bg_highlight.
+- **Nord `danger`** is nord12 (orange): nord11, Nord's red, is 2.5:1 on
+  nord1 and 2.1 on nord2.
+- **Dracula `dim`** is Foreground and `text` its bright white: Comment
+  is 3.4:1 on BGDark and 2.5 on BGLight, and the palette has no other
+  grey. Purple as `dim`, tried first, read as accent on every row.
+  Secondary text is as bright as primary under Dracula; weight and
+  size still separate them.
+
+Looked at under each palette against the demo provider: main with
+playback, search, guide grid, Settings with the Theme picker open,
+the refresh panel and the Keys modal.

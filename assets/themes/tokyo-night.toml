@@ -1,0 +1,24 @@
+# Tokyo Night (night), a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/folke/tokyonight.nvim (lua/tokyonight/colors/night.lua, storm.lua)
+# Licence: Apache-2.0, by folke.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#16161e"           # bg_dark
+surface = "#1a1b26"      # bg
+surface-2 = "#292e42"    # bg_highlight
+line = "#3b4261"         # fg_gutter
+text = "#c0caf5"         # fg
+dim = "#a9b1d6"          # fg_dark
+icon = "#a9b1d6"         # fg_dark
+accent = "#7aa2f7"       # blue
+warn = "#ff9e64"         # orange
+danger = "#f7768e"       # red
+star = "#e0af68"         # yellow
+ok = "#9ece6a"           # green
+logo-backing = "#414868" # terminal_black
+highlight = "#c0caf5"    # fg
+shade = "#0c0e14"        # bg_dark1

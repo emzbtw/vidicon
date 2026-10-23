@@ -12,8 +12,28 @@ use std::time::SystemTime;
 /// in the Theme picker and its file.
 pub type BuiltIn = (&'static str, &'static str, &'static str);
 
-/// The built-in themes (built-in themes ticket 02).
-pub const BUILT_IN: &[BuiltIn] = &[];
+/// A [`BuiltIn`] from `assets/themes/<name>.toml`.
+macro_rules! built_in {
+    ($name:literal, $label:literal) => {
+        (
+            $name,
+            $label,
+            include_str!(concat!("../assets/themes/", $name, ".toml")),
+        )
+    };
+}
+
+/// The built-in themes (built-in themes ticket 02), in picker order.
+pub const BUILT_IN: &[BuiltIn] = &[
+    built_in!("catppuccin-mocha", "Catppuccin Mocha"),
+    built_in!("dracula", "Dracula"),
+    built_in!("everforest-dark", "Everforest Dark"),
+    built_in!("gruvbox-dark", "Gruvbox Dark"),
+    built_in!("kanagawa-wave", "Kanagawa Wave"),
+    built_in!("nord", "Nord"),
+    built_in!("rose-pine", "Rosé Pine"),
+    built_in!("tokyo-night", "Tokyo Night"),
+];
 
 /// One colour per base token; the default is the built-in dark palette, the
 /// same values `ui/app.slint` starts with.
@@ -498,7 +518,65 @@ shade = \"#010101\"
         }
     }
 
-    /// A built-in for the tests, as ticket 02's list is not here yet.
+    /// Every built-in sets every token `FULL` sets, and nothing else.
+    #[test]
+    fn every_built_in_parses_with_every_token() {
+        let keys = |text: &str| -> Vec<String> {
+            let table: BTreeMap<String, toml::Value> = toml::from_str(text).unwrap();
+            table.into_keys().collect()
+        };
+        assert_eq!(BUILT_IN.len(), 8);
+        for (name, _, text) in BUILT_IN {
+            assert_eq!(keys(text), keys(FULL), "{name}");
+            assert!(Palette::parse(text).is_ok(), "{name}");
+        }
+    }
+
+    /// WCAG 2 relative luminance.
+    fn luminance(c: Color) -> f64 {
+        let linear = |v: u8| {
+            let v = f64::from(v) / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(c.red()) + 0.7152 * linear(c.green()) + 0.0722 * linear(c.blue())
+    }
+
+    fn contrast(a: Color, b: Color) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// The contrast floor in `docs/milestones/built-in-themes.md`.
+    #[test]
+    fn every_built_in_meets_the_contrast_floor() {
+        for (name, _, text) in BUILT_IN {
+            let p = Palette::parse(text).unwrap();
+            for (ink, what, floor) in [
+                (p.text, "text", 7.0),
+                (p.dim, "dim", 4.5),
+                (p.accent, "accent", 3.0),
+                (p.warn, "warn", 3.0),
+                (p.danger, "danger", 3.0),
+                (p.star, "star", 3.0),
+                (p.ok, "ok", 3.0),
+            ] {
+                for (back, on) in [
+                    (p.bg, "bg"),
+                    (p.surface, "surface"),
+                    (p.surface_2, "surface-2"),
+                ] {
+                    let ratio = contrast(ink, back);
+                    assert!(ratio >= floor, "{name}: {what} on {on} is {ratio:.2}:1");
+                }
+            }
+        }
+    }
+
+    /// A built-in for the tests, apart from the real list.
     const TEST_BUILT_IN: &[BuiltIn] = &[("dusk", "Dusk", "bg = \"#202020\"\n")];
 
     fn named(name: &str) -> Theme {

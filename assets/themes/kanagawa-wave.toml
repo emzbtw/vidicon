@@ -1,0 +1,24 @@
+# Kanagawa Wave, a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/rebelot/kanagawa.nvim (lua/kanagawa/colors.lua, themes.lua)
+# Licence: MIT, Copyright (c) 2021 Tommaso Laurenzi.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#181820"           # sumiInk1
+surface = "#1f1f28"      # sumiInk3
+surface-2 = "#2a2a37"    # sumiInk4
+line = "#363646"         # sumiInk5
+text = "#dcd7ba"         # fujiWhite
+dim = "#9cabca"          # springViolet2
+icon = "#c8c093"         # oldWhite
+accent = "#7e9cd8"       # crystalBlue
+warn = "#ff9e3b"         # roninYellow
+danger = "#e82424"       # samuraiRed
+star = "#e6c384"         # carpYellow
+ok = "#98bb6c"           # springGreen
+logo-backing = "#54546d" # sumiInk6
+highlight = "#dcd7ba"    # fujiWhite
+shade = "#16161d"        # sumiInk0

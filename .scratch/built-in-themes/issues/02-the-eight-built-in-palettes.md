@@ -1,6 +1,6 @@
 # 02: The eight built-in palettes
 
-Status: open. Blocked by: 01.
+Status: done. Blocked by: 01.
 
 ## Goal
 
@@ -35,10 +35,10 @@ token steps are the model for surfaces).
 
 ## Acceptance
 
-- [ ] Eight files, each naming its source and licence; all eight parse
+- [x] Eight files, each naming its source and licence; all eight parse
   with no missing token (a test).
-- [ ] The contrast test passes for all eight.
-- [ ] Every view looked at under each palette; changes and reasons in
+- [x] The contrast test passes for all eight.
+- [x] Every view looked at under each palette; changes and reasons in
   the milestone doc.
 
 ## Out of scope

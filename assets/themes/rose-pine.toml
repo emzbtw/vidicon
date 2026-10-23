@@ -1,0 +1,24 @@
+# Rosé Pine, a built-in Vidicon theme.
+#
+# Colours from:
+#   https://github.com/rose-pine/neovim (lua/rose-pine/palette.lua, main)
+# Licence: MIT, Copyright (c) 2023 Rosé Pine.
+#
+# Copy this file to ~/.config/vidicon/themes/ to change it. Each
+# comment names the colour in the source palette.
+
+bg = "#191724"           # base
+surface = "#1f1d2e"      # surface
+surface-2 = "#26233a"    # overlay
+line = "#403d52"         # highlight_med
+text = "#e0def4"         # text
+dim = "#908caa"          # subtle
+icon = "#908caa"         # subtle
+accent = "#c4a7e7"       # iris
+warn = "#f6c177"         # gold
+danger = "#eb6f92"       # love
+star = "#f6c177"         # gold
+ok = "#9ccfd8"           # foam
+logo-backing = "#524f67" # highlight_high
+highlight = "#e0def4"    # text
+shade = "#191724"        # base
