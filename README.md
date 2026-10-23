@@ -268,7 +268,7 @@ colours:
 |---|---|
 | `catppuccin-mocha` | [Catppuccin](https://github.com/catppuccin/palette) (MIT), Mocha |
 | `dracula` | [Dracula](https://github.com/dracula/spec) (MIT) |
-| `everforest-dark` | [Everforest](https://github.com/sainnhe/everforest) (MIT), dark medium |
+| `everforest-dark` | [Everforest](https://github.com/sainnhe/everforest) (MIT), dark medium, with the darkest background from dark hard |
 | `gruvbox-dark` | [Gruvbox](https://github.com/morhetz/gruvbox) (MIT), dark medium |
 | `kanagawa-wave` | [Kanagawa](https://github.com/rebelot/kanagawa.nvim) (MIT), Wave |
 | `nord` | [Nord](https://github.com/nordtheme/nord) (MIT) |
