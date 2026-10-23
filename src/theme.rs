@@ -169,11 +169,17 @@ fn hex(text: &str) -> Option<Color> {
 #[derive(Debug, PartialEq)]
 enum Source {
     Default,
-    /// Noctalia's palette file or a user theme's, watched: the palette for
-    /// when it is missing or bad, and the note for when it is missing.
-    File(PathBuf, Palette, Option<String>),
-    /// The note.
-    Unknown(String),
+    /// Noctalia's palette file or a user theme's, watched.
+    File {
+        path: PathBuf,
+        /// The palette for when it is missing or bad.
+        fallback: Palette,
+        /// The note for when it is missing.
+        missing: Option<String>,
+    },
+    Unknown {
+        note: String,
+    },
 }
 
 /// A user file `<name>.toml` in `dir`, watched whether or not it exists
@@ -184,19 +190,31 @@ fn resolve(theme: &Theme, dir: &Path, built_in: &[BuiltIn]) -> Source {
         Theme::Noctalia => {
             let path = config::noctalia_palette_path();
             let missing = format!("No Noctalia palette at {}", path.display());
-            return Source::File(path, Palette::default(), Some(missing));
+            return Source::File {
+                path,
+                fallback: Palette::default(),
+                missing: Some(missing),
+            };
         }
         Theme::Named(name) => name,
     };
     let missing = format!("No theme \"{name}\"");
     if name.contains('/') {
-        return Source::Unknown(missing);
+        return Source::Unknown { note: missing };
     }
     let path = dir.join(format!("{name}.toml"));
     match built_in.iter().find(|b| b.name == name) {
         // Ticket 02's test parses every built-in.
-        Some(b) => Source::File(path, Palette::parse(b.text).unwrap_or_default(), None),
-        None => Source::File(path, Palette::default(), Some(missing)),
+        Some(b) => Source::File {
+            path,
+            fallback: Palette::parse(b.text).unwrap_or_default(),
+            missing: None,
+        },
+        None => Source::File {
+            path,
+            fallback: Palette::default(),
+            missing: Some(missing),
+        },
     }
 }
 
@@ -254,7 +272,10 @@ pub fn choices() -> Vec<ThemeChoice> {
 /// is not (built-in themes ticket 01). A file is watched; the rest are
 /// fixed.
 pub enum Chosen {
-    Fixed(Palette, Option<String>),
+    Fixed {
+        palette: Palette,
+        note: Option<String>,
+    },
     Watched(Watched),
 }
 
@@ -265,24 +286,32 @@ impl Chosen {
 
     fn from_source(source: Source) -> Self {
         match source {
-            Source::Default => Self::Fixed(Palette::default(), None),
-            Source::File(path, fallback, missing) => {
-                Self::Watched(Watched::new(path, fallback, missing))
-            }
-            Source::Unknown(note) => Self::Fixed(Palette::default(), Some(note)),
+            Source::Default => Self::Fixed {
+                palette: Palette::default(),
+                note: None,
+            },
+            Source::File {
+                path,
+                fallback,
+                missing,
+            } => Self::Watched(Watched::new(path, fallback, missing)),
+            Source::Unknown { note } => Self::Fixed {
+                palette: Palette::default(),
+                note: Some(note),
+            },
         }
     }
 
     pub fn palette(&self) -> Palette {
         match self {
-            Self::Fixed(palette, _) => *palette,
+            Self::Fixed { palette, .. } => *palette,
             Self::Watched(watched) => watched.palette,
         }
     }
 
     pub fn note(&self) -> Option<&str> {
         match self {
-            Self::Fixed(_, note) => note.as_deref(),
+            Self::Fixed { note, .. } => note.as_deref(),
             Self::Watched(watched) => watched.note.as_deref(),
         }
     }
@@ -295,7 +324,7 @@ impl Chosen {
     pub fn poll(&mut self) -> bool {
         match self {
             Self::Watched(watched) => watched.poll(),
-            Self::Fixed(..) => false,
+            Self::Fixed { .. } => false,
         }
     }
 }
@@ -606,17 +635,27 @@ shade = \"#010101\"
         let note = |name: &str| Some(format!("No theme \"{name}\""));
         assert_eq!(
             resolve("mine"),
-            Source::File(dir.join("mine.toml"), Palette::default(), note("mine"))
+            Source::File {
+                path: dir.join("mine.toml"),
+                fallback: Palette::default(),
+                missing: note("mine"),
+            }
         );
         // A user file with a built-in's name replaces it, so the built-in
         // is the fallback for a missing or bad one.
         assert_eq!(
             resolve("dusk"),
-            Source::File(dir.join("dusk.toml"), dusk, None)
+            Source::File {
+                path: dir.join("dusk.toml"),
+                fallback: dusk,
+                missing: None,
+            }
         );
         assert_eq!(
             resolve("../mine"),
-            Source::Unknown("No theme \"../mine\"".into())
+            Source::Unknown {
+                note: "No theme \"../mine\"".into()
+            }
         );
 
         let user = Chosen::from_source(resolve("mine"));
@@ -682,8 +721,11 @@ shade = \"#010101\"
             resolve(&Theme::Default, dir, TEST_BUILT_IN),
             Source::Default
         );
-        let Source::File(path, fallback, Some(note)) =
-            resolve(&Theme::Noctalia, dir, TEST_BUILT_IN)
+        let Source::File {
+            path,
+            fallback,
+            missing: Some(note),
+        } = resolve(&Theme::Noctalia, dir, TEST_BUILT_IN)
         else {
             panic!("noctalia is a file with a note");
         };
