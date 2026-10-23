@@ -86,6 +86,7 @@ jobs:
           mkdir "$tarball"
           cp target/release/vidicon README.md LICENSE "$tarball/"
           cp assets/vidicon.desktop assets/vidicon.svg "$tarball/"
+          cp contrib/noctalia/vidicon.toml "$tarball/noctalia-template.toml"
           tar -czf "dist/$tarball.tar.gz" "$tarball"
           cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
 

@@ -43,6 +43,7 @@
           ./ui
           ./vendor
           ./assets
+          ./contrib
         ];
       };
       cargoLock.lockFile = ./Cargo.lock;
@@ -54,10 +55,11 @@
       # tests' local servers; the sandbox has none.
       nativeCheckInputs = [pkgs.cacert];
       # The launcher entry and its icon, matched to the window by its
-      # Wayland app id, `vidicon`.
+      # Wayland app id, `vidicon`. Then the Noctalia template.
       postInstall = ''
         install -Dm644 assets/vidicon.desktop -t $out/share/applications
         install -Dm644 assets/vidicon.svg -t $out/share/icons/hicolor/scalable/apps
+        install -Dm644 contrib/noctalia/vidicon.toml -t $out/share/vidicon/noctalia
       '';
       # Inter comes with the package: Slint adds the files on
       # SLINT_FONT_PATH to the fonts fontconfig finds, so the user's own

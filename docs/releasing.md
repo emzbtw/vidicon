@@ -44,8 +44,9 @@ needs nothing else for it.
 ## Install tests
 
 `packaging/test/install-test.sh` installs a package in a clean container
-and checks that linked and dlopened libraries resolve, `--help` works and
-a launch fails only for want of a display. The workflow runs it on the
+and checks that linked and dlopened libraries resolve, `--help` works, a
+launch fails only for want of a display, and the Noctalia template is
+installed. The workflow runs it on the
 oldest supported release of each distribution plus its `latest` image.
 
 - **Oldest releases** are the ones the README's Install section names.

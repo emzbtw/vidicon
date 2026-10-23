@@ -35,14 +35,24 @@ for the release and its install tests.
 
 ## Acceptance
 
-- [ ] `nix build` puts the template under `result/share/vidicon/`, and
+- [x] `nix build` puts the template under `result/share/vidicon/`, and
   Noctalia renders it from the profile path with `--list-templates`
-  listing it.
+  listing it. (2026-10-23: `nix profile add --profile` into a scratch
+  profile; Noctalia 5.3 listed it under User templates and rendered it
+  through the profile's symlink into the store.)
 - [ ] The deb, rpm and tarball from a release build hold it; the install
-  test checks the deb and rpm.
-- [ ] Both PKGBUILDs install it (`makepkg` in a container, or checked by
-  reading if no Arch image is at hand).
-- [ ] README and site updated; site builds.
+  test checks the deb and rpm. (2026-10-23: a local cargo-deb and
+  cargo-generate-rpm 0.21.1 build both hold it, and the install test
+  checks for it. The tarball and the install test run only in the
+  release workflow: tick this after the next release run.)
+- [x] Both PKGBUILDs install it (`makepkg` in a container, or checked by
+  reading if no Arch image is at hand). (Checked by reading; `git
+  archive` includes `contrib/`. `vidicon` builds only from the next tag:
+  v0.2.0 has no `contrib/`.)
+- [x] README and site updated; site builds.
+- [x] Review findings fixed. (Kept: the tarball names the file
+  `noctalia-template.toml`, the name the README has users save it as,
+  since a bare `vidicon.toml` at its root reads as Vidicon's config.)
 
 ## Out of scope
 

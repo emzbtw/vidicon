@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs a release package on a clean Debian, Ubuntu or Fedora system and
-# checks it runs: linked and dlopened libraries resolve, --help works, and a
-# launch gets as far as finding no display. Run as root in a container:
+# checks it runs: linked and dlopened libraries resolve, --help works, a
+# launch gets as far as finding no display, and the Noctalia template is
+# there. Run as root in a container:
 #
 #   install-test.sh /abs/path/vidicon_amd64.deb
 #   install-test.sh /abs/path/vidicon.x86_64.rpm
@@ -31,6 +32,8 @@ for lib in libEGL.so.1 libGL.so.1 libwayland-client.so.0 libwayland-egl.so.1 \
   ldconfig -p | grep -q "[[:space:]]$lib " || { echo "missing $lib"; missing=1; }
 done
 test $missing = 0
+
+test -f /usr/share/vidicon/noctalia/vidicon.toml || { echo "missing the Noctalia template"; exit 1; }
 
 vidicon --help > /dev/null
 

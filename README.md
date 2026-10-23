@@ -175,9 +175,9 @@ cargo build --release --no-default-features
 replay, the `--probe-*` flags).
 
 The [latest release](https://github.com/emzbtw/vidicon/releases/latest)
-also has a tarball with a prebuilt binary and the desktop entry, for any
-distribution with glibc 2.35 or newer and the runtime dependencies above,
-and a `SHA256SUMS` file.
+also has a tarball with a prebuilt binary, the desktop entry and the
+[Noctalia template](#themes), for any distribution with glibc 2.35 or
+newer and the runtime dependencies above, and a `SHA256SUMS` file.
 
 ## First run
 
@@ -250,17 +250,28 @@ Press `?` in the app for all of them.
 [Noctalia](https://noctalia.dev)'s scheme or wallpaper, and follows them
 as they change. Settings (`,`) has the same switch under General.
 
-Noctalia needs Vidicon's template once. Save
-[`contrib/noctalia/vidicon.toml`](contrib/noctalia/vidicon.toml) as
-`~/.config/vidicon/noctalia-template.toml` (not in `~/.config/noctalia/`,
-where Noctalia reads every `.toml` as its own config), and add to
-Noctalia's `config.toml`:
+Noctalia needs Vidicon's template once. Add to Noctalia's `config.toml`:
 
 ```toml
 [theme.templates.user.vidicon]
-input_path = "~/.config/vidicon/noctalia-template.toml"
+input_path = "/usr/share/vidicon/noctalia/vidicon.toml"
 output_path = "~/.config/vidicon/noctalia-palette.toml"
 ```
+
+`input_path` is where the template was installed:
+
+- **.deb, .rpm, AUR:** `/usr/share/vidicon/noctalia/vidicon.toml`, as above.
+- **Nix:** `/run/current-system/sw/share/vidicon/noctalia/vidicon.toml`
+  from `environment.systemPackages`,
+  `/etc/profiles/per-user/<user>/share/vidicon/noctalia/vidicon.toml`
+  from home-manager with `useUserPackages`, or
+  `~/.nix-profile/share/vidicon/noctalia/vidicon.toml` from `nix profile`.
+- **Tarball:** copy its `noctalia-template.toml` to `~/.config/vidicon/`
+  and point at it there (not in `~/.config/noctalia/`, where Noctalia
+  reads every `.toml` as its own config).
+- **From source:** copy
+  [`contrib/noctalia/vidicon.toml`](contrib/noctalia/vidicon.toml) to
+  `~/.config/vidicon/noctalia-template.toml` and point at it there.
 
 `noctalia theme --list-templates` then lists `vidicon` under User
 templates. On each scheme or wallpaper change Noctalia writes
