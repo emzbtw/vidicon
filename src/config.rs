@@ -338,15 +338,40 @@ pub struct Settings {
     pub theme: Theme,
 }
 
-/// Where the palette comes from (themes ticket 02).
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+/// Where the palette comes from (themes ticket 02): a name in
+/// `config.toml` (built-in themes ticket 01).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(from = "String")]
 pub enum Theme {
-    /// The built-in dark palette.
+    /// The default dark palette.
     #[default]
     Default,
     /// [`noctalia_palette_path`], watched.
     Noctalia,
+    /// A user theme in [`themes_dir`] or a built-in, found by
+    /// `theme::resolve`.
+    Named(String),
+}
+
+impl From<String> for Theme {
+    fn from(name: String) -> Self {
+        match name.as_str() {
+            "default" => Self::Default,
+            "noctalia" => Self::Noctalia,
+            _ => Self::Named(name),
+        }
+    }
+}
+
+impl Theme {
+    /// The name `config.toml` holds.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Default => "default",
+            Self::Noctalia => "noctalia",
+            Self::Named(name) => name,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -374,6 +399,11 @@ pub fn settings_path() -> PathBuf {
 /// `config.toml` (themes ticket 02).
 pub fn noctalia_palette_path() -> PathBuf {
     xdg("XDG_CONFIG_HOME", ".config").join("vidicon/noctalia-palette.toml")
+}
+
+/// User themes, `<name>.toml` each (built-in themes ticket 01).
+pub fn themes_dir() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join("vidicon/themes")
 }
 
 /// The keys `config.toml` may hold (SPEC 4.2), and the only ones the app
@@ -1588,7 +1618,7 @@ mod tests {
         assert!(load_settings(&path).unwrap_err().contains("mpv_pth"));
         fs::write(&path, "refresh_hours = 8\n").unwrap();
         assert!(load_settings(&path).is_err());
-        fs::write(&path, "theme = \"nord\"\n").unwrap();
+        fs::write(&path, "theme = 7\n").unwrap();
         assert!(load_settings(&path).is_err());
     }
 
@@ -1636,8 +1666,11 @@ mpv_path = \"/opt/mpv\"      # a newer build
         assert_eq!(load_settings(&path).unwrap().theme, Theme::Noctalia);
         let s = save_setting(&path, "theme", Some("default".into())).unwrap();
         assert_eq!(s.theme, Theme::Default);
-        assert!(save_setting(&path, "theme", Some("nord".into())).is_err());
-        assert_eq!(load_settings(&path).unwrap().theme, Theme::Default);
+        let s = save_setting(&path, "theme", Some("nord".into())).unwrap();
+        assert_eq!(s.theme, Theme::Named("nord".into()));
+        assert_eq!(s.theme.name(), "nord");
+        assert!(save_setting(&path, "theme", Some(7.into())).is_err());
+        assert_eq!(load_settings(&path).unwrap().theme.name(), "nord");
     }
 
     #[test]

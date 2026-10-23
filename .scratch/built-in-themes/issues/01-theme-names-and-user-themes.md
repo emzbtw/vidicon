@@ -1,6 +1,6 @@
 # 01: Theme names and user themes
 
-Status: open. Blocked by: none.
+Status: done. Blocked by: none.
 
 ## Goal
 
@@ -36,14 +36,14 @@ kind is the picker `Start with` already uses.
 
 ## Acceptance
 
-- [ ] Unit tests: name resolution (user file, built-in, unknown), a
+- [x] Unit tests: name resolution (user file, built-in, unknown), a
   user file shadowing a built-in name (with a test-only built-in),
   and the old `config.toml` values.
-- [ ] Against the demo provider: a user theme in a throwaway
+- [x] Against the demo provider: a user theme in a throwaway
   `XDG_CONFIG_HOME` is listed, chosen, applied, and re-applied within
   about a second after an edit; removing it gives the default palette
   and the note. Checked with `--screenshot` and `--keys`.
-- [ ] Choosing Default or Noctalia still behaves as in v0.3.0.
+- [x] Choosing Default or Noctalia still behaves as in v0.3.0.
 
 ## Out of scope
 

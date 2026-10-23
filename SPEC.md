@@ -113,6 +113,7 @@ Single process, three concerns on separate threads:
 | Settings | `$XDG_CONFIG_HOME/vidicon/config.toml` |
 | Credentials | `$XDG_CONFIG_HOME/vidicon/credentials.toml` (override: `--credentials <path>` or `VIDICON_CREDENTIALS`) |
 | Noctalia palette | `$XDG_CONFIG_HOME/vidicon/noctalia-palette.toml`, read with `theme = "noctalia"` (8.1) |
+| User themes | `$XDG_CONFIG_HOME/vidicon/themes/<name>.toml`, read with `theme = "<name>"` (8.1) |
 | Database | `$XDG_DATA_HOME/vidicon/vidicon.db`, set `0600` on open: an M3U channel's URL can carry the account |
 | mpv socket | `$XDG_RUNTIME_DIR/vidicon/mpv.sock` |
 | Logs | stderr only in v1 |
@@ -304,7 +305,7 @@ downloads_dir = "/srv/films" # where d downloads (VOD ticket 10); default
 ffmpeg_path = "ffmpeg"      # records scheduled programmes (9.5)
 record_before = 2           # minutes a scheduled recording starts early
 record_after = 5            # and runs late
-theme = "default"           # or "noctalia" (8.1)
+theme = "default"           # "noctalia", a built-in or a user theme (8.1)
 ```
 
 Missing file means defaults. Unknown keys are an error (catches typos).
@@ -324,7 +325,8 @@ managed: its values show, a note says why (`config.toml is managed by
 Nix; edit it there`, `config.toml is read-only to you, so nothing here
 saves`), and nothing saves. The app reads the file at start and after
 its own saves, never watching it; the one file it watches is the
-Noctalia palette (8.1). A saved value applies without a restart:
+chosen theme's file, Noctalia's palette or a user theme (8.1). A saved
+value applies without a restart:
 `refresh_hours` re-arms every provider's check, run at once on the new
 age; `theme` re-colours the window; `active_provider` is used from the
 next start.
@@ -1272,6 +1274,15 @@ palette; a bad one (`noctalia-palette.toml: line 3: not a colour`)
 keeps the last good. Either way the Theme field in Settings says why
 (`No Noctalia palette at <path>`).
 
+Any other value names a theme (built-in themes milestone,
+`docs/milestones/built-in-themes.md`): a user theme
+`themes/<name>.toml` (Paths, 3) first, then a built-in, so a user file
+with a built-in's name replaces it. A user theme is the same format,
+read and watched as the Noctalia file is (`No theme "<name>"` when it
+is missing), except that removing one with a built-in's name gives the
+built-in back; built-ins are not watched. An unknown name gives the
+default palette and the Theme field says `No theme "<name>"`.
+
 Wayland app ids, for compositor window rules: `vidicon` for the app window,
 `vidicon-mpv` for the Player (9.1).
 
@@ -1726,8 +1737,11 @@ branch).
   04). General: Start with (`active_provider`),
   a picker of `Last used` and each provider by name, used from the next
   start; Refresh when older than (`refresh_hours`), a `12 h` / `6 h`
-  switch; Theme (`theme`), a `Default` / `Noctalia` switch, with why
-  the Noctalia palette is not in use under it (8.1). Enter on the
+  switch; Theme (`theme`), a picker of `Default`, `Noctalia`, the
+  built-ins by name, then the user themes by file stem in name order,
+  read when Settings opens, with why the chosen palette is not in use
+  under it (8.1). A saved name no longer there stays in the list, last,
+  so the field never changes it unasked. Enter on the
   switch flips it; on the picker it opens its list under the field,
   the saved entry ticked, where `j`/`k` move, Enter chooses and Esc
   cancels. Each choice saves at once, no Save button. A

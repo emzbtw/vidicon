@@ -1,11 +1,19 @@
 //! The colour palette (themes milestone): the base tokens of `Palette` in
 //! `ui/app.slint`. The translucent tokens there are derived from these.
 
+use crate::config::{self, Theme};
 use crate::ui::AppWindow;
 use slint::{Color, ComponentHandle};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+/// A theme that ships with Vidicon: its name in `config.toml`, its label
+/// in the Theme picker and its file.
+pub type BuiltIn = (&'static str, &'static str, &'static str);
+
+/// The built-in themes (built-in themes ticket 02).
+pub const BUILT_IN: &[BuiltIn] = &[];
 
 /// One colour per base token; the default is the built-in dark palette, the
 /// same values `ui/app.slint` starts with.
@@ -131,21 +139,157 @@ fn hex(text: &str) -> Option<Color> {
     u32::from_str_radix(digits, 16).ok().map(rgb)
 }
 
-/// The palette from Noctalia's palette file, read again whenever its mtime
-/// changes (themes ticket 02). A missing or unreadable file gives the
-/// default palette, a bad one keeps the last good; either way `note` says
-/// why.
+/// Where a theme's palette comes from (built-in themes ticket 01).
+#[derive(Debug, PartialEq)]
+enum Source {
+    Default,
+    /// Noctalia's palette file or a user theme, watched; the note for
+    /// when it is missing.
+    File(PathBuf, String),
+    BuiltIn(&'static str),
+    /// The note.
+    Unknown(String),
+}
+
+/// A user file `<name>.toml` in `dir` first, then a built-in.
+fn resolve(theme: &Theme, dir: &Path, built_in: &[BuiltIn]) -> Source {
+    let name = match theme {
+        Theme::Default => return Source::Default,
+        Theme::Noctalia => {
+            let path = config::noctalia_palette_path();
+            let missing = format!("No Noctalia palette at {}", path.display());
+            return Source::File(path, missing);
+        }
+        Theme::Named(name) => name,
+    };
+    let missing = format!("No theme \"{name}\"");
+    let path = dir.join(format!("{name}.toml"));
+    if !name.contains('/') && path.is_file() {
+        return Source::File(path, missing);
+    }
+    match built_in.iter().find(|(n, ..)| n == name) {
+        Some((.., text)) => Source::BuiltIn(text),
+        None => Source::Unknown(missing),
+    }
+}
+
+/// The Theme picker's options, name and label each: Default, Noctalia, the
+/// built-ins, then the user themes in `dir` by file stem in name order. A
+/// user file with a built-in's name is that built-in's entry.
+fn choices_in(dir: &Path, built_in: &[BuiltIn]) -> Vec<(String, String)> {
+    let mut user: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.extension()? != "toml" || !path.is_file() {
+                return None;
+            }
+            path.file_stem()?.to_str().map(str::to_owned)
+        })
+        .filter(|stem| {
+            matches!(Theme::from(stem.clone()), Theme::Named(_))
+                && !built_in.iter().any(|(n, ..)| n == stem)
+        })
+        .collect();
+    user.sort();
+    [("default", "Default"), ("noctalia", "Noctalia")]
+        .into_iter()
+        .chain(built_in.iter().map(|(name, label, _)| (*name, *label)))
+        .map(|(name, label)| (name.to_owned(), label.to_owned()))
+        .chain(user.into_iter().map(|stem| (stem.clone(), stem)))
+        .collect()
+}
+
+/// [`choices_in`] the user's themes directory.
+pub fn choices() -> Vec<(String, String)> {
+    choices_in(&config::themes_dir(), BUILT_IN)
+}
+
+/// The palette `theme` names, and why it is not the one asked for, if it
+/// is not (built-in themes ticket 01). A file is watched, with the theme
+/// it is for; the rest are fixed.
+pub enum Chosen {
+    Fixed(Palette, Option<String>),
+    Watched(Watched, Theme),
+}
+
+impl Chosen {
+    pub fn new(theme: &Theme) -> Self {
+        Self::from_source(resolve(theme, &config::themes_dir(), BUILT_IN), theme)
+    }
+
+    fn from_source(source: Source, theme: &Theme) -> Self {
+        match source {
+            Source::Default => Self::Fixed(Palette::default(), None),
+            Source::File(path, missing) => {
+                Self::Watched(Watched::new(path, missing), theme.clone())
+            }
+            // Ticket 02's test parses every built-in.
+            Source::BuiltIn(text) => Self::Fixed(Palette::parse(text).unwrap_or_default(), None),
+            Source::Unknown(note) => Self::Fixed(Palette::default(), Some(note)),
+        }
+    }
+
+    pub fn palette(&self) -> Palette {
+        match self {
+            Self::Fixed(palette, _) => *palette,
+            Self::Watched(watched, _) => watched.palette,
+        }
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        match self {
+            Self::Fixed(_, note) => note.as_deref(),
+            Self::Watched(watched, _) => watched.note.as_deref(),
+        }
+    }
+
+    pub fn is_watched(&self) -> bool {
+        matches!(self, Self::Watched(..))
+    }
+
+    /// [`Watched::poll`]; a fixed palette never changes.
+    pub fn poll(&mut self) -> bool {
+        self.poll_in(&config::themes_dir(), BUILT_IN)
+    }
+
+    /// A removed user file with a built-in's name gives the built-in back,
+    /// as copying one to tweak it made the file; with no built-in it stays
+    /// watched, so the file can come back.
+    fn poll_in(&mut self, dir: &Path, built_in: &[BuiltIn]) -> bool {
+        let Self::Watched(watched, theme) = self else {
+            return false;
+        };
+        if !watched.poll() {
+            return false;
+        }
+        if watched.mtime.is_none()
+            && let source @ Source::BuiltIn(_) = resolve(theme, dir, built_in)
+        {
+            *self = Self::from_source(source, &theme.clone());
+        }
+        true
+    }
+}
+
+/// The palette from a theme file, Noctalia's or a user theme, read again
+/// whenever its mtime changes (themes ticket 02). A missing or unreadable
+/// file gives the default palette, a bad one keeps the last good; either
+/// way `note` says why, `missing` when there is no file.
 pub struct Watched {
     path: PathBuf,
+    missing: String,
     mtime: Option<SystemTime>,
     pub palette: Palette,
     pub note: Option<String>,
 }
 
 impl Watched {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, missing: String) -> Self {
         let mut watched = Self {
             path,
+            missing,
             mtime: None,
             palette: Palette::default(),
             note: None,
@@ -177,7 +321,7 @@ impl Watched {
             Err(e) => {
                 self.palette = Palette::default();
                 self.note = Some(if e.kind() == std::io::ErrorKind::NotFound {
-                    format!("No Noctalia palette at {}", self.path.display())
+                    self.missing.clone()
                 } else {
                     format!("Cannot read {}: {e}", self.path.display())
                 });
@@ -354,6 +498,143 @@ shade = \"#010101\"
         }
     }
 
+    /// A built-in for the tests, as ticket 02's list is not here yet.
+    const TEST_BUILT_IN: &[BuiltIn] = &[("dusk", "Dusk", "bg = \"#202020\"\n")];
+
+    fn named(name: &str) -> Theme {
+        Theme::Named(name.into())
+    }
+
+    #[test]
+    fn a_name_is_a_user_file_then_a_built_in() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        std::fs::write(dir.join("mine.toml"), "bg = \"#303030\"\n").unwrap();
+        let resolve = |theme: &Theme| resolve(theme, dir, TEST_BUILT_IN);
+        assert_eq!(
+            resolve(&named("mine")),
+            Source::File(dir.join("mine.toml"), "No theme \"mine\"".into())
+        );
+        assert_eq!(
+            resolve(&named("dusk")),
+            Source::BuiltIn("bg = \"#202020\"\n")
+        );
+        let unknown = |name: &str| Source::Unknown(format!("No theme \"{name}\""));
+        assert_eq!(resolve(&named("nord")), unknown("nord"));
+        assert_eq!(resolve(&named("../mine")), unknown("../mine"));
+
+        // A user file with a built-in's name replaces it.
+        std::fs::write(dir.join("dusk.toml"), "bg = \"#404040\"\n").unwrap();
+        assert_eq!(
+            resolve(&named("dusk")),
+            Source::File(dir.join("dusk.toml"), "No theme \"dusk\"".into())
+        );
+
+        let unknown = Chosen::from_source(resolve(&named("nord")), &named("nord"));
+        assert_eq!(unknown.palette(), Palette::default());
+        assert_eq!(unknown.note(), Some("No theme \"nord\""));
+        let user = Chosen::from_source(resolve(&named("mine")), &named("mine"));
+        assert_eq!((user.palette().bg, user.note()), (rgb(0x303030), None));
+        assert!(user.is_watched());
+    }
+
+    #[test]
+    fn removing_a_tweaked_built_in_gives_the_built_in_back() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        let poll = |chosen: &mut Chosen| chosen.poll_in(dir, TEST_BUILT_IN);
+        for name in ["dusk", "mine"] {
+            rewrite(
+                &dir.join(format!("{name}.toml")),
+                "bg = \"#404040\"\n",
+                1_000,
+            );
+        }
+
+        let mut dusk =
+            Chosen::from_source(resolve(&named("dusk"), dir, TEST_BUILT_IN), &named("dusk"));
+        assert_eq!(dusk.palette().bg, rgb(0x404040));
+        std::fs::remove_file(dir.join("dusk.toml")).unwrap();
+        assert!(poll(&mut dusk));
+        assert_eq!((dusk.palette().bg, dusk.note()), (rgb(0x202020), None));
+        assert!(!dusk.is_watched() && !poll(&mut dusk));
+
+        // With no built-in: the default and the note, still watched.
+        let mut mine =
+            Chosen::from_source(resolve(&named("mine"), dir, TEST_BUILT_IN), &named("mine"));
+        std::fs::remove_file(dir.join("mine.toml")).unwrap();
+        assert!(poll(&mut mine));
+        assert_eq!(mine.palette(), Palette::default());
+        assert_eq!(mine.note(), Some("No theme \"mine\""));
+        rewrite(&dir.join("mine.toml"), "bg = \"#505050\"\n", 2_000);
+        assert!(poll(&mut mine));
+        assert_eq!((mine.palette().bg, mine.note()), (rgb(0x505050), None));
+    }
+
+    /// `config.toml`'s values from before names keep their meaning.
+    #[test]
+    fn default_and_noctalia_load_as_before() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        // Files named like them in the themes directory change nothing.
+        std::fs::write(dir.join("default.toml"), "bg = \"#303030\"\n").unwrap();
+        std::fs::write(dir.join("noctalia.toml"), "bg = \"#303030\"\n").unwrap();
+        for (text, theme) in [("default", Theme::Default), ("noctalia", Theme::Noctalia)] {
+            let path = dir.join("config.toml");
+            std::fs::write(&path, format!("theme = \"{text}\"\n")).unwrap();
+            assert_eq!(config::load_settings(&path).unwrap().theme, theme);
+        }
+        assert_eq!(
+            resolve(&Theme::Default, dir, TEST_BUILT_IN),
+            Source::Default
+        );
+        let Source::File(path, note) = resolve(&Theme::Noctalia, dir, TEST_BUILT_IN) else {
+            panic!("noctalia is a file");
+        };
+        assert!(path.ends_with("vidicon/noctalia-palette.toml"), "{path:?}");
+        assert!(note.starts_with("No Noctalia palette at /"), "{note}");
+        assert!(note.ends_with("noctalia-palette.toml"), "{note}");
+        let fixed = Chosen::from_source(Source::Default, &Theme::Default);
+        assert_eq!((fixed.palette(), fixed.note()), (Palette::default(), None));
+        assert!(!fixed.is_watched());
+    }
+
+    #[test]
+    fn the_picker_lists_built_ins_then_user_themes_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        let names = |dir: &Path| -> Vec<String> {
+            choices_in(dir, TEST_BUILT_IN)
+                .into_iter()
+                .map(|(name, label)| format!("{name}:{label}"))
+                .collect()
+        };
+        assert_eq!(
+            names(&dir.join("missing")),
+            ["default:Default", "noctalia:Noctalia", "dusk:Dusk"]
+        );
+        for file in [
+            "zeta.toml",
+            "alpha.toml",
+            "dusk.toml",
+            "default.toml",
+            "notes.txt",
+        ] {
+            std::fs::write(dir.join(file), "").unwrap();
+        }
+        std::fs::create_dir(dir.join("folder.toml")).unwrap();
+        assert_eq!(
+            names(dir),
+            [
+                "default:Default",
+                "noctalia:Noctalia",
+                "dusk:Dusk",
+                "alpha:alpha",
+                "zeta:zeta"
+            ]
+        );
+    }
+
     /// Sets the mtime apart from the last write's, as a later rewrite
     /// would, however fast the test runs.
     fn rewrite(path: &std::path::Path, text: impl AsRef<[u8]>, secs: u64) {
@@ -371,11 +652,9 @@ shade = \"#010101\"
     fn a_watched_file_is_read_again_when_it_changes() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("noctalia-palette.toml");
-        let mut watched = Watched::new(path.clone());
+        let mut watched = Watched::new(path.clone(), "No palette".into());
         assert_eq!(watched.palette, Palette::default());
-        let note = watched.note.clone().unwrap();
-        assert!(note.starts_with("No Noctalia palette at /"), "{note}");
-        assert!(note.ends_with("noctalia-palette.toml"), "{note}");
+        assert_eq!(watched.note.as_deref(), Some("No palette"));
         assert!(!watched.poll());
 
         rewrite(&path, "bg = \"#203040\"\n", 1_000);

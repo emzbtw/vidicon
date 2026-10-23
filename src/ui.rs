@@ -3438,6 +3438,9 @@ struct SettingsView {
     create: Option<PathBuf>,
     /// Settings › EPG is shown (EPG sources ticket 04).
     epg: Option<EpgView>,
+    /// The Theme picker's names and labels, read when Settings opens
+    /// (built-in themes ticket 01).
+    themes: Vec<(String, String)>,
 }
 
 impl SettingsView {
@@ -4473,6 +4476,25 @@ const SETTING_FIELDS: [&[&str]; 6] = [
     &[],
 ];
 
+/// The Theme picker's options and the saved one's place in them: `themes`,
+/// and the saved name after them when it is not there, so the field never
+/// changes it unasked.
+fn theme_options(
+    themes: &[(String, String)],
+    saved: &config::Theme,
+) -> (Vec<(String, String)>, usize) {
+    let mut themes = themes.to_vec();
+    let name = saved.name();
+    let at = match themes.iter().position(|(n, _)| n == name) {
+        Some(at) => at,
+        None => {
+            themes.push((name.to_owned(), name.to_owned()));
+            themes.len() - 1
+        }
+    };
+    (themes, at)
+}
+
 /// What a Settings text field shows and is edited as: the value as typed,
 /// `extra_mpv_args` as a shell line.
 fn setting_text(settings: &config::Settings, key: &str) -> String {
@@ -4489,12 +4511,13 @@ fn setting_text(settings: &config::Settings, key: &str) -> String {
 /// The fields of Settings section `section`, from `settings`: General's
 /// switch and picker; Player, Recording and Downloads text and steppers
 /// (settings ticket 02); Providers and EPG are empty. `providers` is each
-/// provider's id and name; `theme_note` is why the theme's palette is not
-/// in use.
+/// provider's id and name; `themes` the Theme picker's names and labels,
+/// and `theme_note` why the theme's palette is not in use.
 fn setting_items(
     section: usize,
     settings: &config::Settings,
     providers: &[(&str, &str)],
+    themes: &[(String, String)],
     theme_note: Option<&str>,
 ) -> Vec<SettingItem> {
     let text = |label: &str, note: &str, key: &str| SettingItem {
@@ -4528,6 +4551,7 @@ fn setting_items(
                 .iter()
                 .position(|&h| h == settings.refresh_hours)
                 .unwrap_or(0);
+            let (themes, theme) = theme_options(themes, &settings.theme);
             vec![
                 SettingItem {
                     label: "Start with".into(),
@@ -4552,10 +4576,11 @@ fn setting_items(
                 },
                 SettingItem {
                     label: "Theme".into(),
-                    note: "theme · Noctalia follows its palette file".into(),
-                    kind: SettingKind::Toggle,
-                    options: options(vec!["Default", "Noctalia"]),
-                    chosen: (settings.theme == config::Theme::Noctalia) as i32,
+                    note: "theme · Noctalia and user themes follow their files".into(),
+                    value: themes[theme].1.as_str().into(),
+                    kind: SettingKind::Choice,
+                    options: options(themes.iter().map(|(_, label)| label.as_str()).collect()),
+                    chosen: theme as i32,
                     error: theme_note.unwrap_or_default().into(),
                     ..Default::default()
                 },
@@ -4747,9 +4772,9 @@ struct Screen {
     panel_timer: slint::Timer,
     /// Counts a backoff down in the refresh panel.
     stage_timer: slint::Timer,
-    /// The Noctalia palette file while `theme` is `"noctalia"`, and the
-    /// timer that checks it.
-    theme: Option<theme::Watched>,
+    /// The palette `theme` names, and the timer that checks its file when
+    /// it has one.
+    theme: theme::Chosen,
     theme_timer: slint::Timer,
     /// This screen, for a timer to reach it.
     me: std::rc::Weak<RefCell<Screen>>,
@@ -8451,6 +8476,7 @@ impl Screen {
         self.settings_view = Some(SettingsView {
             managed: config::managed(&self.settings_path),
             providers_managed: config::managed(&self.credentials_path),
+            themes: theme::choices(),
             ..Default::default()
         });
         self.show_settings();
@@ -8532,8 +8558,13 @@ impl Screen {
             .iter()
             .map(|s| (s.provider.id.as_str(), s.provider.name.as_str()))
             .collect();
-        let theme_note = self.theme.as_ref().and_then(|t| t.note.as_deref());
-        setting_items(view.section, &self.settings, &providers, theme_note)
+        setting_items(
+            view.section,
+            &self.settings,
+            &providers,
+            &view.themes,
+            self.theme.note(),
+        )
     }
 
     fn show_settings(&self) {
@@ -8661,6 +8692,7 @@ impl Screen {
                 section: i.min(SETTINGS_SECTIONS.len() - 1),
                 managed: view.managed.take(),
                 providers_managed: view.providers_managed.take(),
+                themes: std::mem::take(&mut view.themes),
                 ..Default::default()
             };
             if SETTINGS_SECTIONS[view.section] == "EPG" {
@@ -8946,16 +8978,12 @@ impl Screen {
                     }
                 }
                 2 => {
-                    let theme = if option == 0 {
-                        config::Theme::Default
-                    } else {
-                        config::Theme::Noctalia
-                    };
-                    if theme != self.settings.theme {
-                        let name = match theme {
-                            config::Theme::Default => "default",
-                            config::Theme::Noctalia => "noctalia",
-                        };
+                    let (themes, saved) = theme_options(&view.themes, &self.settings.theme);
+                    // The saved one again reads its file again, as one made
+                    // since it was missing.
+                    if option == saved {
+                        self.watch_theme();
+                    } else if let Some((name, _)) = themes.into_iter().nth(option) {
                         self.save_setting("theme", Some(name.into()));
                     }
                 }
@@ -10343,6 +10371,7 @@ impl Screen {
             in_fields: true,
             form: (form && providers_managed.is_none()).then(ProviderForm::default),
             providers_managed,
+            themes: theme::choices(),
             ..Default::default()
         });
         self.setup = Some(setup);
@@ -10437,18 +10466,13 @@ impl Screen {
         }
     }
 
-    /// Applies the palette `theme` names. With `"noctalia"` its file is
-    /// read, then checked again each second, a change applying live
-    /// (themes ticket 02).
+    /// Applies the palette `theme` names. Noctalia's file or a user
+    /// theme's is read, then checked again each second, a change applying
+    /// live (themes ticket 02, built-in themes ticket 01).
     fn watch_theme(&mut self) {
-        let watched = match self.settings.theme {
-            config::Theme::Default => None,
-            config::Theme::Noctalia => Some(theme::Watched::new(config::noctalia_palette_path())),
-        };
-        let palette = watched.as_ref().map(|w| w.palette).unwrap_or_default();
-        palette.apply(&self.window());
-        self.theme = watched;
-        if self.theme.is_none() {
+        self.theme = theme::Chosen::new(&self.settings.theme);
+        self.theme.palette().apply(&self.window());
+        if !self.theme.is_watched() {
             self.theme_timer.stop();
             return;
         }
@@ -10461,14 +10485,10 @@ impl Screen {
                     return;
                 };
                 let mut s = screen.borrow_mut();
-                let Some(watched) = &mut s.theme else {
-                    return;
-                };
-                if !watched.poll() {
+                if !s.theme.poll() {
                     return;
                 }
-                let palette = watched.palette;
-                palette.apply(&s.window());
+                s.theme.palette().apply(&s.window());
                 s.show_settings();
             },
         );
@@ -11944,7 +11964,7 @@ pub fn run(
             clear_timer: slint::Timer::default(),
             panel_timer: slint::Timer::default(),
             stage_timer: slint::Timer::default(),
-            theme: None,
+            theme: theme::Chosen::new(&config::Theme::Default),
             theme_timer: slint::Timer::default(),
             later,
             logos,
@@ -12563,6 +12583,25 @@ mod tests {
         assert_eq!(along(21, -1), Some(12));
         assert_eq!(along(11, -1), None, "before the first");
         assert_eq!(along(99, 1), None, "no longer listed");
+    }
+
+    /// A saved theme no longer there stays, last (built-in themes ticket
+    /// 01).
+    #[test]
+    fn the_theme_picker_keeps_a_saved_name_that_is_gone() {
+        let themes: Vec<(String, String)> = [("default", "Default"), ("plum", "plum")]
+            .map(|(n, l)| (n.to_owned(), l.to_owned()))
+            .into();
+        let (options, at) =
+            super::theme_options(&themes, &crate::config::Theme::Named("plum".into()));
+        assert_eq!((options, at), (themes.clone(), 1));
+        let (options, at) =
+            super::theme_options(&themes, &crate::config::Theme::Named("gone".into()));
+        assert_eq!(
+            options.last(),
+            Some(&("gone".to_owned(), "gone".to_owned()))
+        );
+        assert_eq!((options.len(), at), (3, 2));
     }
 
     #[test]
