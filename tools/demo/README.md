@@ -257,6 +257,13 @@ vidicon --play --screenshot docs/screenshots/main-guide.png \
   invented orange image and a dark magenta one, then joined along a
   diagonal (`magick <magenta> <orange> <mask> -composite`, the mask
   white over the left, from x 1100 at the top to 800 at the bottom);
+  `themes-built-in`: four `main-guide` shots, with `theme =
+  "catppuccin-mocha"`, `"everforest-dark"`, `"gruvbox-dark"` and `"nord"`
+  in `config.toml`, and `TZ` set so the local time is early evening
+  (`TZ=Etc/GMT+3` at 22:00 UTC), so the guide pane lists the evening
+  rather than stopping at midnight; joined along three diagonals the
+  same way, the masks white left of x 650, 1150 and 1650 at the top and
+  300 less at the bottom;
   `account`: `i`, padded with `jk` pairs on both sides (the keys go to the
   dashboard and do nothing) so its fresh check has answered;
   `categories`: last, as rules and overrides are kept:

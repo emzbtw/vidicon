@@ -1,6 +1,6 @@
 # 03: Docs, screenshots and the milestone review
 
-Status: open. Blocked by: 02.
+Status: done. Blocked by: 02.
 
 ## Goal
 
@@ -26,9 +26,9 @@ for screenshots.
 
 ## Acceptance
 
-- [ ] README and site updated; site builds.
-- [ ] Screenshots taken against the demo provider.
-- [ ] Milestone review findings fixed.
+- [x] README and site updated; site builds.
+- [x] Screenshots taken against the demo provider.
+- [x] Milestone review findings fixed.
 
 ## Out of scope
 

@@ -43,7 +43,7 @@ bring your own provider account ([Disclaimer](#disclaimer)).
 - Movies and series, with resume and downloads.
 - External XMLTV guide sources, matched to channels by id or name.
 - Reconnects a dropped stream, and lists a channel's other listings.
-- Colours from your Noctalia scheme or wallpaper, following it live.
+- Eight built-in dark themes, your own theme files, or Noctalia's colours, followed live.
 - Keyboard first (vim keys and arrows), with full mouse support.
 
 It stays fast with large providers: on 50k channels the first frame is
@@ -176,7 +176,7 @@ replay, the `--probe-*` flags).
 
 The [latest release](https://github.com/emzbtw/vidicon/releases/latest)
 also has a tarball with a prebuilt binary, the desktop entry and the
-[Noctalia template](#themes), for any distribution with glibc 2.35 or
+[Noctalia template](#noctalia), for any distribution with glibc 2.35 or
 newer and the runtime dependencies above, and a `SHA256SUMS` file.
 
 ## First run
@@ -245,10 +245,80 @@ Press `?` in the app for all of them.
 
 ## Themes
 
-`theme = "default"` in `config.toml` is Vidicon's own dark palette.
-`theme = "noctalia"` takes the colours from
-[Noctalia](https://noctalia.dev)'s scheme or wallpaper, and follows them
-as they change. Settings (`,`) has the same switch under General.
+`theme` in `config.toml` names the palette. Settings (`,`) has the same
+picker under General, and a palette applies as soon as it is chosen.
+
+- `theme = "default"`: Vidicon's own dark palette.
+- A built-in theme, such as `theme = "nord"`.
+- `theme = "noctalia"`: the colours of [Noctalia](https://noctalia.dev)'s
+  scheme or wallpaper, followed as they change.
+- A user theme, by its file name without `.toml`.
+
+An unknown name gives the default palette, and the Theme field in
+Settings says `No theme "<name>"`.
+
+![The main screen under Catppuccin Mocha, Everforest Dark, Gruvbox Dark and Nord](docs/screenshots/themes-built-in.png)
+
+### Built-in themes
+
+Eight dark palettes ship with Vidicon, each from its project's published
+colours:
+
+| `theme` | From |
+|---|---|
+| `catppuccin-mocha` | [Catppuccin](https://github.com/catppuccin/palette) (MIT), Mocha |
+| `dracula` | [Dracula](https://github.com/dracula/spec) (MIT) |
+| `everforest-dark` | [Everforest](https://github.com/sainnhe/everforest) (MIT), dark medium |
+| `gruvbox-dark` | [Gruvbox](https://github.com/morhetz/gruvbox) (MIT), dark medium |
+| `kanagawa-wave` | [Kanagawa](https://github.com/rebelot/kanagawa.nvim) (MIT), Wave |
+| `nord` | [Nord](https://github.com/nordtheme/nord) (MIT) |
+| `rose-pine` | [Rosé Pine](https://github.com/rose-pine/neovim) (MIT), main |
+| `tokyo-night` | [Tokyo Night](https://github.com/folke/tokyonight.nvim) (Apache-2.0), night |
+
+Each keeps text readable on every background (at least 7:1 for text,
+4.5:1 for secondary text, 3:1 for accents), so a few take a nearby
+colour from their family where the usual one is too faint. Nord's
+errors, for example, are its orange: its red is 2.5:1 on its panels.
+
+### User themes
+
+A user theme is a file in `~/.config/vidicon/themes/`
+(`$XDG_CONFIG_HOME/vidicon/themes/`), chosen by its name:
+`themes/dusk.toml` is `theme = "dusk"`. Settings lists the files there
+each time it opens. Each line sets one colour:
+
+```toml
+bg = "#0e1014"           # the darkest background
+surface = "#151920"      # a step lighter
+surface-2 = "#1c212a"    # a step lighter again
+line = "#262c37"         # borders and dividers
+logo-backing = "#3a404c" # behind channel logos
+text = "#e7e9ee"
+dim = "#8b93a4"          # secondary text
+icon = "#c9cedb"         # icons at rest
+accent = "#7c9cff"       # selection and focus
+warn = "#e8a86b"         # warnings
+danger = "#ef6b6b"       # errors
+star = "#f2c14e"         # favourites
+ok = "#6fcf97"           # the online dot
+highlight = "#ffffff"    # what hover and press lighten with
+shade = "#000000"        # what scrims and shadows darken with
+```
+
+These are the default palette's colours. A colour left out keeps its
+default, so a file can set only `accent`. A bad line is named under the
+Theme field in Settings, and the palette stays as it was (the default
+one at start).
+
+To change a built-in theme, copy its file from
+[`assets/themes/`](assets/themes/) to `~/.config/vidicon/themes/` under
+the same name and edit it: a user theme with a built-in's name replaces
+it. Each file names the source of every colour.
+
+While a user theme is chosen, Vidicon checks its file once a second, so
+an edit shows in the running window within a second of saving it.
+
+### Noctalia
 
 Noctalia needs Vidicon's template once. Add to Noctalia's `config.toml`:
 

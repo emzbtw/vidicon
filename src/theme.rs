@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 /// A theme that ships with Vidicon: its name in `config.toml`, its label
 /// in the Theme picker and its file.
-pub type BuiltIn = (&'static str, &'static str, &'static str);
+type BuiltIn = (&'static str, &'static str, &'static str);
 
 /// A [`BuiltIn`] from `assets/themes/<name>.toml`.
 macro_rules! built_in {
@@ -24,7 +24,7 @@ macro_rules! built_in {
 }
 
 /// The built-in themes (built-in themes ticket 02), in picker order.
-pub const BUILT_IN: &[BuiltIn] = &[
+const BUILT_IN: &[BuiltIn] = &[
     built_in!("catppuccin-mocha", "Catppuccin Mocha"),
     built_in!("dracula", "Dracula"),
     built_in!("everforest-dark", "Everforest Dark"),
@@ -306,7 +306,7 @@ pub struct Watched {
 }
 
 impl Watched {
-    pub fn new(path: PathBuf, missing: String) -> Self {
+    fn new(path: PathBuf, missing: String) -> Self {
         let mut watched = Self {
             path,
             missing,
