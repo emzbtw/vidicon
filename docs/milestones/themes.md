@@ -97,19 +97,33 @@ template can still set `highlight` from `on_surface`.
 - `theme` is the third field in General, a `Default` / `Noctalia`
   switch like `refresh_hours`.
 
-## Proposed (settle in the tickets)
+## Template (settled in ticket 03)
 
-- Token mapping from Noctalia's Material 3 names: `bg` from `surface`,
-  `surface` and `surface-2` from `surface_container_low` and
-  `surface_container`, `line` from `outline_variant`, `text` and `dim`
-  from `on_surface` and `on_surface_variant`, `accent` from `primary`,
-  `danger` from `error`. Noctalia's `hover` is a solid colour, not an
-  overlay, and its `scrim` is opaque black, so neither maps directly:
-  hover and pressed are `text` at the current alphas, the scrim is
-  `scrim` at the current alpha.
-- `star`, `ok` and `warn` stay fixed: Material 3 has no yellow, green or
-  orange role. Check them against a few wallpapers.
-- `logo-backing` derived from `surface` (lighter by a fixed step), so
-  white and dark logos both stay visible.
-- Later: offer the template to Noctalia's community catalog so setup is
-  one toggle in Noctalia's Templates settings.
+`contrib/noctalia/vidicon.toml`, reading `.dark` variants. Checked by
+contrast against 50 renders: Noctalia's 10 schemes on 5 invented
+images of different hue and brightness. Worst cases: `text` 11.3:1,
+`dim` 6.1, `accent` 4.6, `danger` 4.2 on `bg`, `surface` and
+`surface-2`.
+
+- `bg` is `surface_dim`; `surface`, `surface-2`, `line` and
+  `logo-backing` are `surface_dim | lighten 4`, `7`, `11` and `19`,
+  the steps of the default palette in HSL lightness points. The
+  container roles do not work: the non-Material schemes (`vibrant`,
+  `faithful`, `soft`, `muted`, `dysfunctional`) put
+  `surface_container_low` below `surface` and `surface_container`
+  above `_high`, and their `surface` is lighter than the Material ones,
+  which `surface_dim` is not.
+- `text` and `highlight` are `on_surface`; `dim` and `icon` are
+  `on_surface_variant`. `outline` is near 2:1 in the non-Material
+  schemes.
+- `accent` is `primary`; `shade` is `scrim`.
+- `warn`, `danger`, `star` and `ok` are left out and keep the default
+  palette's. Material has no orange, yellow or green role, and `error`
+  in the non-Material schemes takes the wallpaper's hue (2.1:1, and
+  magenta, on a magenta one).
+- Noctalia's filters take lightness points (`lighten 4`), not
+  fractions. Noctalia reads every `.toml` in `~/.config/noctalia/` as
+  config, so the README puts the template in `~/.config/vidicon/`.
+
+Later: offer the template to Noctalia's community catalog so setup is
+one toggle in Noctalia's Templates settings.

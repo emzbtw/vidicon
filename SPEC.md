@@ -1262,7 +1262,8 @@ Every colour comes from the `Palette` global, whose base tokens Rust
 sets (themes milestone, `docs/milestones/themes.md`); the translucent
 ones are derived from them. `theme = "default"` (4.2) is the built-in
 palette. `theme = "noctalia"` reads the palette file (Paths, 3), which
-Noctalia renders from Vidicon's template: TOML, `token = "#rrggbb"` per
+Noctalia renders from Vidicon's template (`contrib/noctalia/vidicon.toml`,
+set up as in the README's Themes): TOML, `token = "#rrggbb"` per
 base token, named as in `Palette` (`bg`, `surface-2`, `logo-backing`).
 A token left out keeps its default; an unknown key is ignored. The app
 checks the file's mtime once a second while the theme is `noctalia` and

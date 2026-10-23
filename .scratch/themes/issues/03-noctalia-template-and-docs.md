@@ -1,6 +1,6 @@
 # 03: Noctalia template, docs and screenshots
 
-Status: open. Blocked by: 02.
+Status: done. Blocked by: 02.
 
 ## Goal
 
@@ -34,14 +34,24 @@ prints every token. The built-in templates under Noctalia's
 
 ## Acceptance
 
-- [ ] With the template registered in a throwaway `XDG_CONFIG_HOME`,
+- [x] With the template registered in a throwaway `XDG_CONFIG_HOME`,
   `--list-templates` lists it and a render writes a file Vidicon loads
-  with no fallback note.
-- [ ] A wallpaper change in the running Noctalia re-themes a running
+  with no fallback note. (2026-10-23: registered as the README says,
+  from `~/.config/vidicon/noctalia-template.toml`; listed under User
+  templates; rendered by `noctalia theme <image> --dark -c`; the Theme
+  field showed no note, and `No Noctalia palette at <path>` with the
+  file removed.)
+- [x] A wallpaper change in the running Noctalia re-themes a running
   Vidicon within about a second (checked by the user, on their
-  desktop).
-- [ ] Contrast checked against the four renders; screenshots taken.
-- [ ] Milestone review findings fixed.
+  desktop, 2026-10-23).
+- [x] Contrast checked against the four renders; screenshots taken.
+  (50 renders, numbers in `docs/milestones/themes.md`.)
+- [x] Milestone review findings fixed. (Theme field no longer rewrites
+  `config.toml` when unchanged; test helper and template header tidied.
+  Left: the six-place token list in `theme.rs` (15 tokens, a macro is
+  not worth it), `theme::Palette` sharing the Slint global's name, and
+  `Screen`'s self-`Weak`, which the Settings save path needs to restart
+  the timer from `&mut self`.)
 
 ## Out of scope
 

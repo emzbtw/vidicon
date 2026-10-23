@@ -131,7 +131,7 @@ fn hex(text: &str) -> Option<Color> {
     u32::from_str_radix(digits, 16).ok().map(rgb)
 }
 
-/// The palette from a theme file that is read again whenever its mtime
+/// The palette from Noctalia's palette file, read again whenever its mtime
 /// changes (themes ticket 02). A missing or unreadable file gives the
 /// default palette, a bad one keeps the last good; either way `note` says
 /// why.
@@ -356,7 +356,7 @@ shade = \"#010101\"
 
     /// Sets the mtime apart from the last write's, as a later rewrite
     /// would, however fast the test runs.
-    fn rewrite(path: &std::path::Path, text: &str, secs: u64) {
+    fn rewrite(path: &std::path::Path, text: impl AsRef<[u8]>, secs: u64) {
         std::fs::write(path, text).unwrap();
         let mtime = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
         std::fs::File::options()
@@ -393,13 +393,7 @@ shade = \"#010101\"
             Some("noctalia-palette.toml: line 3: not a colour")
         );
 
-        std::fs::write(&path, b"bg = \"#\xff\"\n").unwrap();
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2_500))
-            .unwrap();
+        rewrite(&path, b"bg = \"#\xff\"\n", 2_500);
         assert!(watched.poll());
         assert_eq!(watched.palette.bg, rgb(0x203040));
         assert_eq!(

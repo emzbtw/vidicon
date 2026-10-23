@@ -8946,8 +8946,18 @@ impl Screen {
                     }
                 }
                 2 => {
-                    let theme = if option == 0 { "default" } else { "noctalia" };
-                    self.save_setting("theme", Some(theme.into()));
+                    let theme = if option == 0 {
+                        config::Theme::Default
+                    } else {
+                        config::Theme::Noctalia
+                    };
+                    if theme != self.settings.theme {
+                        let name = match theme {
+                            config::Theme::Default => "default",
+                            config::Theme::Noctalia => "noctalia",
+                        };
+                        self.save_setting("theme", Some(name.into()));
+                    }
                 }
                 _ => {}
             }

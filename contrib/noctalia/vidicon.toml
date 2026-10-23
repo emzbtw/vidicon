@@ -1,0 +1,23 @@
+# Vidicon (https://github.com/emzbtw/vidicon): its palette from Noctalia.
+# Noctalia renders this file to ~/.config/vidicon/noctalia-palette.toml on
+# every scheme or wallpaper change; Vidicon reads it with theme = "noctalia".
+#
+# Dark variants only: Vidicon has no light theme yet.
+# The surfaces are steps up from surface_dim, spaced as in Vidicon's default
+# palette: the container roles are ordered differently in the non-Material
+# schemes (vibrant, muted and the rest).
+# dim is on_surface_variant, not outline, which is near 2:1 in those schemes.
+# warn, danger, star and ok are left out and keep Vidicon's colours: Material
+# has no orange, yellow or green role, and error goes magenta on a magenta
+# wallpaper there.
+bg = "{{colors.surface_dim.dark.hex}}"
+surface = "{{colors.surface_dim.dark.hex | lighten 4}}"
+surface-2 = "{{colors.surface_dim.dark.hex | lighten 7}}"
+line = "{{colors.surface_dim.dark.hex | lighten 11}}"
+logo-backing = "{{colors.surface_dim.dark.hex | lighten 19}}"
+text = "{{colors.on_surface.dark.hex}}"
+dim = "{{colors.on_surface_variant.dark.hex}}"
+icon = "{{colors.on_surface_variant.dark.hex}}"
+accent = "{{colors.primary.dark.hex}}"
+highlight = "{{colors.on_surface.dark.hex}}"
+shade = "{{colors.scrim.dark.hex}}"

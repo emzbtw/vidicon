@@ -43,6 +43,7 @@ bring your own provider account ([Disclaimer](#disclaimer)).
 - Movies and series, with resume and downloads.
 - External XMLTV guide sources, matched to channels by id or name.
 - Reconnects a dropped stream, and lists a channel's other listings.
+- Colours from your Noctalia scheme or wallpaper, following it live.
 - Keyboard first (vim keys and arrows), with full mouse support.
 
 It stays fast with large providers: on 50k channels the first frame is
@@ -241,6 +242,36 @@ guide, catch-up, movies and series.
 | `q` | Quit |
 
 Press `?` in the app for all of them.
+
+## Themes
+
+`theme = "default"` in `config.toml` is Vidicon's own dark palette.
+`theme = "noctalia"` takes the colours from
+[Noctalia](https://noctalia.dev)'s scheme or wallpaper, and follows them
+as they change. Settings (`,`) has the same switch under General.
+
+Noctalia needs Vidicon's template once. Save
+[`contrib/noctalia/vidicon.toml`](contrib/noctalia/vidicon.toml) as
+`~/.config/vidicon/noctalia-template.toml` (not in `~/.config/noctalia/`,
+where Noctalia reads every `.toml` as its own config), and add to
+Noctalia's `config.toml`:
+
+```toml
+[theme.templates.user.vidicon]
+input_path = "~/.config/vidicon/noctalia-template.toml"
+output_path = "~/.config/vidicon/noctalia-palette.toml"
+```
+
+`noctalia theme --list-templates` then lists `vidicon` under User
+templates. On each scheme or wallpaper change Noctalia writes
+`noctalia-palette.toml`, and Vidicon applies it within a second. Until
+that file exists, the Theme field in Settings says `No Noctalia palette
+at <path>`.
+
+Vidicon stays dark when Noctalia is in light mode, and keeps its own
+colours for warnings, errors, favourites and the online dot.
+
+![The main screen under two Noctalia palettes](docs/screenshots/themes.png)
 
 ## Reporting a bug
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import GithubSlugger from 'github-slugger';
 
 // README `## ` headings that become pages, in sidebar order.
-const PAGES = ['Install', 'First run', 'Keys', 'Reporting a bug', 'Disclaimer'];
+const PAGES = ['Install', 'First run', 'Keys', 'Themes', 'Reporting a bug', 'Disclaimer'];
 // README `## ` headings written to src/generated/ (git-ignored) as partials
 // for the landing page to import. A partial is on no docs page, so its
 // anchor links all point to pages.
