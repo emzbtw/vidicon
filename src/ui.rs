@@ -3438,9 +3438,9 @@ struct SettingsView {
     create: Option<PathBuf>,
     /// Settings › EPG is shown (EPG sources ticket 04).
     epg: Option<EpgView>,
-    /// The Theme picker's names and labels, read when Settings opens
-    /// (built-in themes ticket 01).
-    themes: Vec<(String, String)>,
+    /// The Theme picker's options, read when Settings opens (built-in
+    /// themes ticket 01).
+    themes: Vec<theme::ThemeChoice>,
 }
 
 impl SettingsView {
@@ -4480,15 +4480,15 @@ const SETTING_FIELDS: [&[&str]; 6] = [
 /// and the saved name after them when it is not there, so the field never
 /// changes it unasked.
 fn theme_options(
-    themes: &[(String, String)],
+    themes: &[theme::ThemeChoice],
     saved: &config::Theme,
-) -> (Vec<(String, String)>, usize) {
+) -> (Vec<theme::ThemeChoice>, usize) {
     let mut themes = themes.to_vec();
     let name = saved.name();
-    let at = match themes.iter().position(|(n, _)| n == name) {
+    let at = match themes.iter().position(|choice| choice.name == name) {
         Some(at) => at,
         None => {
-            themes.push((name.to_owned(), name.to_owned()));
+            themes.push(theme::ThemeChoice::new(name, name));
             themes.len() - 1
         }
     };
@@ -4511,13 +4511,12 @@ fn setting_text(settings: &config::Settings, key: &str) -> String {
 /// The fields of Settings section `section`, from `settings`: General's
 /// switch and picker; Player, Recording and Downloads text and steppers
 /// (settings ticket 02); Providers and EPG are empty. `providers` is each
-/// provider's id and name; `themes` the Theme picker's names and labels,
-/// and `theme_note` why the theme's palette is not in use.
+/// provider's id and name; `themes` the Theme picker's options, and `theme_note` why the theme's palette is not in use.
 fn setting_items(
     section: usize,
     settings: &config::Settings,
     providers: &[(&str, &str)],
-    themes: &[(String, String)],
+    themes: &[theme::ThemeChoice],
     theme_note: Option<&str>,
 ) -> Vec<SettingItem> {
     let text = |label: &str, note: &str, key: &str| SettingItem {
@@ -4577,9 +4576,9 @@ fn setting_items(
                 SettingItem {
                     label: "Theme".into(),
                     note: "theme · Noctalia and user themes follow their files".into(),
-                    value: themes[theme].1.as_str().into(),
+                    value: themes[theme].label.as_str().into(),
                     kind: SettingKind::Choice,
-                    options: options(themes.iter().map(|(_, label)| label.as_str()).collect()),
+                    options: options(themes.iter().map(|choice| choice.label.as_str()).collect()),
                     chosen: theme as i32,
                     error: theme_note.unwrap_or_default().into(),
                     ..Default::default()
@@ -8983,8 +8982,8 @@ impl Screen {
                     // since it was missing.
                     if option == saved {
                         self.watch_theme();
-                    } else if let Some((name, _)) = themes.into_iter().nth(option) {
-                        self.save_setting("theme", Some(name.into()));
+                    } else if let Some(choice) = themes.into_iter().nth(option) {
+                        self.save_setting("theme", Some(choice.name.into()));
                     }
                 }
                 _ => {}
@@ -12589,18 +12588,17 @@ mod tests {
     /// 01).
     #[test]
     fn the_theme_picker_keeps_a_saved_name_that_is_gone() {
-        let themes: Vec<(String, String)> = [("default", "Default"), ("plum", "plum")]
-            .map(|(n, l)| (n.to_owned(), l.to_owned()))
-            .into();
+        use crate::theme::ThemeChoice;
+        let themes = vec![
+            ThemeChoice::new("default", "Default"),
+            ThemeChoice::new("plum", "plum"),
+        ];
         let (options, at) =
             super::theme_options(&themes, &crate::config::Theme::Named("plum".into()));
         assert_eq!((options, at), (themes.clone(), 1));
         let (options, at) =
             super::theme_options(&themes, &crate::config::Theme::Named("gone".into()));
-        assert_eq!(
-            options.last(),
-            Some(&("gone".to_owned(), "gone".to_owned()))
-        );
+        assert_eq!(options.last(), Some(&ThemeChoice::new("gone", "gone")));
         assert_eq!((options.len(), at), (3, 2));
     }
 

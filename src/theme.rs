@@ -194,10 +194,27 @@ fn resolve(theme: &Theme, dir: &Path, built_in: &[BuiltIn]) -> Source {
     }
 }
 
-/// The Theme picker's options, name and label each: Default, Noctalia, the
-/// built-ins, then the user themes in `dir` by file stem in name order. A
-/// user file with a built-in's name is that built-in's entry.
-fn choices_in(dir: &Path, built_in: &[BuiltIn]) -> Vec<(String, String)> {
+/// An option in the Theme picker: the name `config.toml` holds and the
+/// label shown.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThemeChoice {
+    pub name: String,
+    pub label: String,
+}
+
+impl ThemeChoice {
+    pub fn new(name: &str, label: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            label: label.to_owned(),
+        }
+    }
+}
+
+/// The Theme picker's options: Default, Noctalia, the built-ins, then the
+/// user themes in `dir` by file stem in name order. A user file with a
+/// built-in's name is that built-in's entry.
+fn choices_in(dir: &Path, built_in: &[BuiltIn]) -> Vec<ThemeChoice> {
     let mut user: Vec<String> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -214,16 +231,20 @@ fn choices_in(dir: &Path, built_in: &[BuiltIn]) -> Vec<(String, String)> {
         })
         .collect();
     user.sort();
-    [("default", "Default"), ("noctalia", "Noctalia")]
-        .into_iter()
-        .chain(built_in.iter().map(|(name, label, _)| (*name, *label)))
-        .map(|(name, label)| (name.to_owned(), label.to_owned()))
-        .chain(user.into_iter().map(|stem| (stem.clone(), stem)))
+    Theme::FIXED
+        .iter()
+        .map(|(_, name, label)| ThemeChoice::new(name, label))
+        .chain(
+            built_in
+                .iter()
+                .map(|(name, label, _)| ThemeChoice::new(name, label)),
+        )
+        .chain(user.iter().map(|stem| ThemeChoice::new(stem, stem)))
         .collect()
 }
 
 /// [`choices_in`] the user's themes directory.
-pub fn choices() -> Vec<(String, String)> {
+pub fn choices() -> Vec<ThemeChoice> {
     choices_in(&config::themes_dir(), BUILT_IN)
 }
 
@@ -676,7 +697,7 @@ shade = \"#010101\"
         let names = |dir: &Path| -> Vec<String> {
             choices_in(dir, TEST_BUILT_IN)
                 .into_iter()
-                .map(|(name, label)| format!("{name}:{label}"))
+                .map(|choice| format!("{}:{}", choice.name, choice.label))
                 .collect()
         };
         assert_eq!(

@@ -355,21 +355,29 @@ pub enum Theme {
 
 impl From<String> for Theme {
     fn from(name: String) -> Self {
-        match name.as_str() {
-            "default" => Self::Default,
-            "noctalia" => Self::Noctalia,
-            _ => Self::Named(name),
+        match Self::FIXED.into_iter().find(|(_, n, _)| *n == name) {
+            Some((theme, ..)) => theme,
+            None => Self::Named(name),
         }
     }
 }
 
 impl Theme {
+    /// The themes that are not looked up by name, each with the name
+    /// `config.toml` holds and its label in the Theme picker.
+    pub const FIXED: [(Theme, &'static str, &'static str); 2] = [
+        (Theme::Default, "default", "Default"),
+        (Theme::Noctalia, "noctalia", "Noctalia"),
+    ];
+
     /// The name `config.toml` holds.
     pub fn name(&self) -> &str {
         match self {
-            Self::Default => "default",
-            Self::Noctalia => "noctalia",
             Self::Named(name) => name,
+            fixed => Self::FIXED
+                .iter()
+                .find(|(theme, ..)| theme == fixed)
+                .map_or("", |(_, name, _)| name),
         }
     }
 }
