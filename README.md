@@ -20,6 +20,7 @@
   <a href="#install">Install</a> ·
   <a href="#first-run">First run</a> ·
   <a href="#keys">Keys</a> ·
+  <a href="#themes">Themes</a> ·
   <a href="#reporting-a-bug">Reporting a bug</a> ·
   <a href="#disclaimer">Disclaimer</a>
 </p>
@@ -211,10 +212,10 @@ user_agent = "Example/1.0"                # optional
 
 Every entry is a live channel, in its `group-title` category. The guide
 comes from the feeds the playlist names in its `#EXTM3U` line
-(`url-tvg` or `x-tvg-url`), and from any guide sources you add. A URL is fetched again
-on the refresh schedule; a file is read again when it changes. An M3U
-provider has no account, catch-up, movies or series, and the app hides
-them.
+(`url-tvg` or `x-tvg-url`), and from any guide sources you add. A URL
+is fetched again on the refresh schedule; a file is read again when it
+changes. An M3U provider has no account, catch-up, movies or series, and
+the app hides them.
 
 ![An M3U provider: no movies or series, a backup stream under its channel](docs/screenshots/main-m3u.png)
 
@@ -249,10 +250,10 @@ Press `?` in the app for all of them.
 picker under General, and a palette applies as soon as it is chosen.
 
 - `theme = "default"`: Vidicon's own dark palette.
-- A built-in theme, such as `theme = "nord"`.
-- `theme = "noctalia"`: the colours of [Noctalia](https://noctalia.dev)'s
-  scheme or wallpaper, followed as they change.
-- A user theme, by its file name without `.toml`.
+- A [built-in theme](#built-in-themes), such as `theme = "nord"`.
+- A [user theme](#user-themes), by its file name without `.toml`.
+- `theme = "noctalia"`: the colours of [Noctalia](#noctalia)'s scheme or
+  wallpaper, followed as they change.
 
 An unknown name gives the default palette, and the Theme field in
 Settings says `No theme "<name>"`.
@@ -357,8 +358,6 @@ at <path>`.
 Vidicon stays dark when Noctalia is in light mode, and keeps its own
 colours for warnings, errors, favourites and the online dot.
 
-![The main screen under two Noctalia palettes](docs/screenshots/themes.png)
-
 ## Reporting a bug
 
 Say which view you were in and what you pressed. Logs go to stderr:
@@ -371,7 +370,8 @@ Logs leave out passwords and stream URLs, but they name channels,
 programmes and image hosts. Read the log before you attach it.
 
 Every Xtream provider differs a little. If something fails only on your
-provider, say so.
+provider, say so. Open bugs on the
+[issue tracker](https://github.com/emzbtw/vidicon/issues).
 
 ## Disclaimer
 
@@ -397,7 +397,7 @@ Vidicon is built on:
 - [Inter](https://rsms.me/inter/) by Rasmus Andersson (OFL-1.1): the
   typeface.
 - [femtovg](https://github.com/femtovg/femtovg): the renderer. A patched
-  copy is in `vendor/femtovg` (`vendor/README.md`).
+  copy is in `vendor/femtovg` ([`vendor/README.md`](vendor/README.md)).
 - [nucleo](https://github.com/helix-editor/nucleo), from the Helix editor:
   fuzzy matching.
 - [tokio](https://tokio.rs) and [reqwest](https://github.com/seanmonstar/reqwest):
@@ -405,7 +405,7 @@ Vidicon is built on:
 - [Noctalia](https://noctalia.dev): the palettes behind
   `theme = "noctalia"`, rendered from Vidicon's template.
 
-`Cargo.lock` has the full list of dependencies.
+[`Cargo.lock`](Cargo.lock) has the full list of dependencies.
 
 Vidicon was written with the help of AI coding assistants.
 
@@ -418,4 +418,4 @@ Vidicon was written with the help of AI coding assistants.
 
 ## Licence
 
-GPL-3.0-or-later (`LICENSE`).
+GPL-3.0-or-later ([`LICENSE`](LICENSE)).

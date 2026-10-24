@@ -251,19 +251,13 @@ vidicon --play --screenshot docs/screenshots/main-guide.png \
   so the guide is part way;
   `first-run`: with `DEMO_SLOW=get_live_streams:20` and an empty
   `XDG_DATA_HOME`, 120 `jk` pairs, so the channels are part way;
-  `themes`: `theme = "noctalia"` in `config.toml`, two `main-guide`
-  shots with the palette file rendered from `contrib/noctalia/vidicon.toml`
-  by `noctalia theme <image> --dark -r <template>:<palette>` for an
-  invented orange image and a dark magenta one, then joined along a
-  diagonal (`magick <magenta> <orange> <mask> -composite`, the mask
-  white over the left, from x 1100 at the top to 800 at the bottom);
   `themes-built-in`: four `main-guide` shots, with `theme =
   "catppuccin-mocha"`, `"everforest-dark"`, `"gruvbox-dark"` and `"nord"`
   in `config.toml`, and `TZ` set so the local time is early evening
   (`TZ=Etc/GMT+3` at 22:00 UTC), so the guide pane lists the evening
-  rather than stopping at midnight; joined along three diagonals the
-  same way, the masks white left of x 650, 1150 and 1650 at the top and
-  300 less at the bottom;
+  rather than stopping at midnight; joined along three diagonals
+  (`magick <right> <left> <mask> -composite` for each, the masks white
+  left of x 650, 1150 and 1650 at the top and 300 less at the bottom);
   `account`: `i`, padded with `jk` pairs on both sides (the keys go to the
   dashboard and do nothing) so its fresh check has answered;
   `categories`: last, as rules and overrides are kept:
