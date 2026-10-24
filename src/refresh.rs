@@ -413,7 +413,7 @@ impl Refresher {
     /// provider, so sources edited in the file since are the ones used.
     fn sync_sources(&self, now: i64) -> Result<Vec<Planned>, String> {
         let mut conn = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        epg_sources::sync(&mut conn, &self.client.provider(), now)
+        epg_sources::sync(&mut conn, &self.client.provider(), self.max_age, now)
     }
 
     /// The account check (SPEC 6.3), once per refresh: sends what it found

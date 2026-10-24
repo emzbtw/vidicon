@@ -204,7 +204,7 @@ user_agent = "Example/1.0"      # optional
   `xmltv.php`, so its `provider_guide` place holds the guide feeds its
   playlist's `#EXTM3U` line names, nothing written to the file. Its
   `enabled` and `shift_minutes` apply to each feed; each is otherwise
-  an unnamed URL source with the default limits, and
+  an unnamed URL source due when older than `refresh_hours` (7.2), and
   `[[provider.epg]]` entries work as for Xtream. A feed is called by its
   URL's file name (`uk.xml.xz`), as a playlist's feeds often share one
   host, else by its host; a name met again gets ` 2` as above. A feed an
@@ -1231,7 +1231,10 @@ build.
   on the same schedule and `r`; a playlist path is read again when its
   modification time differs from the last read's, or on `r`, not by age.
   The EPG stage has no `xmltv.php` to fetch; external guide sources run
-  as for any provider.
+  as for any provider. The playlist's feeds (4.1) stand in for
+  `xmltv.php`, so they are due when older than `refresh_hours`, not on
+  a source's 12 h; a source in the file with a feed's URL keeps its own
+  `every_hours`.
 - An edit in Settings › EPG (4.1) asks the provider's refresher for a
   pass at once, as `refresh_hours` does; one asked while a refresh runs
   follows it.

@@ -227,8 +227,9 @@ fn unique(base: &str, taken: &mut Vec<String>) -> String {
 
 /// An M3U provider's playlist feeds `urls` (M3U ticket 05) as sources
 /// for its guide's slot: on, off and shifted with that entry, fetched as
-/// any URL with the default limits. A feed an entry names already is left
-/// to that entry. None for an Xtream provider.
+/// any URL, on `refresh_hours` once [`crate::epg_sources::sync`] sets
+/// it. A feed an entry names already is left to that entry. None for an
+/// Xtream provider.
 pub fn playlist_feeds(provider: &Provider, urls: &[String]) -> Vec<EpgSource> {
     if provider.source != Source::M3u {
         return Vec::new();

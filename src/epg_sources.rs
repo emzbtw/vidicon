@@ -149,9 +149,20 @@ pub fn feeds(conn: &Connection, provider: &Provider) -> Vec<EpgSource> {
 
 /// Stores the provider's sources in their order, its own guide first unless
 /// an entry places it, its playlist's feeds after it, and returns the
-/// enabled external ones in order.
-pub fn sync(conn: &mut Connection, provider: &Provider, now: i64) -> Result<Vec<Planned>, String> {
-    let sources = feed_order(provider, &feeds(conn, provider));
+/// enabled external ones in order. The feeds stand in for the provider's
+/// guide, so they are due on its age, `max_age` (`refresh_hours`), not
+/// every 12 h.
+pub fn sync(
+    conn: &mut Connection,
+    provider: &Provider,
+    max_age: i64,
+    now: i64,
+) -> Result<Vec<Planned>, String> {
+    let mut feeds = feeds(conn, provider);
+    for feed in &mut feeds {
+        feed.every_hours = u32::try_from(max_age / 3600).ok();
+    }
+    let sources = feed_order(provider, &feeds);
     let idents: Vec<String> = sources.iter().map(EpgSource::ident).collect();
     let entries: Vec<store::SourceEntry> = sources
         .iter()
@@ -746,7 +757,7 @@ mod tests {
 
     /// Syncs `epg` and imports source A from [`feed`]; returns its id.
     fn with_source(conn: &mut Connection, epg: Vec<EpgSource>) -> i64 {
-        let planned = sync(conn, &provider(epg), NOW).unwrap();
+        let planned = sync(conn, &provider(epg), 12 * H, NOW).unwrap();
         let a = planned[0].id;
         let shift = planned[0].source.shift_minutes * 60;
         write_source(conn, "p", a, feed().as_bytes(), shift, NOW).unwrap();
@@ -787,7 +798,10 @@ mod tests {
             url("https://epg.example.net/a.xml?token=2"),
             provider_guide(true),
         ];
-        assert_eq!(sync(&mut conn, &provider(epg), NOW).unwrap()[0].id, a);
+        assert_eq!(
+            sync(&mut conn, &provider(epg), 12 * H, NOW).unwrap()[0].id,
+            a
+        );
         assert_eq!(
             guides(&conn),
             [gid("h1"), gid("kestrel.ext"), None, gid("jun")]
@@ -837,7 +851,7 @@ mod tests {
         // names already is that entry's.
         let header = format!("{url_a},{url_b},https://epg.example.net/c.xml?t=2");
         let p = m3u(&mut conn, vec![c.clone(), provider_guide(true)], &header);
-        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let planned = sync(&mut conn, &p, 12 * H, NOW).unwrap();
         let idents: Vec<String> = planned.iter().map(|s| s.source.ident()).collect();
         assert_eq!(
             idents,
@@ -867,7 +881,7 @@ mod tests {
             ["P", "a.xml", "a.xml 2", "m.example"]
         );
         let p = m3u(&mut conn, vec![provider_guide(true), c], &header);
-        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let planned = sync(&mut conn, &p, 12 * H, NOW).unwrap();
         let (a, b, c) = (planned[0].id, planned[1].id, planned[2].id);
         assert!(planned.iter().all(|s| s.due), "new, so due at once");
 
@@ -899,7 +913,7 @@ mod tests {
 
         // The guide's entry off turns its feeds off, their data kept.
         let p = m3u(&mut conn, vec![provider_guide(false)], &header);
-        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let planned = sync(&mut conn, &p, 12 * H, NOW).unwrap();
         assert!(
             planned
                 .iter()
@@ -908,12 +922,36 @@ mod tests {
         assert_eq!(m3u_guides(&conn), [None, None, None]);
         // A feed gone from the header goes, and B takes over.
         let p = m3u(&mut conn, vec![provider_guide(true)], url_b);
-        let planned = sync(&mut conn, &p, NOW).unwrap();
+        let planned = sync(&mut conn, &p, 12 * H, NOW).unwrap();
         assert_eq!(planned.iter().map(|s| s.id).collect::<Vec<_>>(), [b]);
         assert_eq!(
             m3u_guides(&conn),
             [gid(b, "h1"), gid(b, "kes"), gid(b, "sum")]
         );
+    }
+
+    #[test]
+    fn playlist_feeds_follow_refresh_hours() {
+        let (_dir, mut conn) = db();
+        let own = url("https://epg.example.net/c.xml");
+        let p = m3u(
+            &mut conn,
+            vec![provider_guide(true), own],
+            "https://g.example/a.xml",
+        );
+        for s in sync(&mut conn, &p, 6 * H, NOW).unwrap() {
+            write_source(&mut conn, "p", s.id, doc(&[], &[]).as_bytes(), 0, NOW).unwrap();
+            store::source_requested(&conn, s.id, NOW).unwrap();
+        }
+        let mut due = |at| -> Vec<bool> {
+            let planned = sync(&mut conn, &p, 6 * H, at).unwrap();
+            planned.iter().map(|s| s.due).collect()
+        };
+        // The feed is due on the provider's age; the file's source keeps
+        // its own 12 h.
+        assert_eq!(due(NOW + 6 * H - 1), [false, false]);
+        assert_eq!(due(NOW + 6 * H), [true, false]);
+        assert_eq!(due(NOW + 12 * H), [true, true]);
     }
 
     /// One feed, 2k channels by 3 days of half hours (288k programmes),
@@ -940,6 +978,7 @@ mod tests {
         let source = sync(
             &mut conn,
             &provider(vec![url("https://e.example/f.xml")]),
+            12 * H,
             NOW,
         )
         .unwrap()[0]
@@ -1093,7 +1132,7 @@ mod tests {
         std::fs::write(&feed_file, feed()).unwrap();
         let mut a = url("");
         (a.url, a.path) = (None, Some(feed_file.clone()));
-        let planned = sync(&mut conn, &provider(vec![a]), NOW).unwrap();
+        let planned = sync(&mut conn, &provider(vec![a]), 12 * H, NOW).unwrap();
         let writer: Writer = std::sync::Arc::new(std::sync::Mutex::new(conn));
         // The real clock: the fixture's programmes are long past.
         assert_eq!(
@@ -1128,7 +1167,7 @@ mod tests {
         let mut off = url("https://epg.example.net/a.xml");
         off.enabled = false;
         assert!(
-            sync(&mut conn, &provider(vec![off]), NOW)
+            sync(&mut conn, &provider(vec![off]), 12 * H, NOW)
                 .unwrap()
                 .is_empty()
         );
@@ -1138,12 +1177,13 @@ mod tests {
         sync(
             &mut conn,
             &provider(vec![url("https://epg.example.net/a.xml")]),
+            12 * H,
             NOW,
         )
         .unwrap();
         assert_eq!(guides(&conn)[3], Some(store::source_guide_id(a, "jun")));
         // Gone from the file: its data goes.
-        sync(&mut conn, &provider(vec![]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![]), 12 * H, NOW).unwrap();
         assert_eq!(count(&conn, "SELECT count(*) FROM programme"), 1);
         assert_eq!(count(&conn, "SELECT count(*) FROM source_channel"), 0);
         assert_eq!(count(&conn, "SELECT count(*) FROM source_match"), 0);
@@ -1175,7 +1215,7 @@ mod tests {
             enabled: false,
             ..a
         };
-        sync(&mut conn, &provider(vec![off]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![off]), 12 * H, NOW).unwrap();
         assert_eq!(store::only_provider_guide(&conn, "p").unwrap(), 1);
     }
 
@@ -1243,16 +1283,16 @@ mod tests {
         // Off, the pin is skipped and kept; on again, it is back.
         let mut off = source.clone();
         off.enabled = false;
-        sync(&mut conn, &provider(vec![off]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![off]), 12 * H, NOW).unwrap();
         assert_eq!(guides(&conn)[0].as_deref(), Some("h1"));
         assert_eq!(count(&conn, "SELECT count(*) FROM source_pin"), 1);
-        sync(&mut conn, &provider(vec![source.clone()]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![source.clone()]), 12 * H, NOW).unwrap();
         assert_eq!(guides(&conn)[0].as_deref(), Some(g.as_str()));
 
         // Pinned to the provider's guide below A, with a shift: a copy of
         // the provider's programmes, made again by its import.
         let order = vec![source.clone(), provider_guide(true)];
-        sync(&mut conn, &provider(order.clone()), NOW).unwrap();
+        sync(&mut conn, &provider(order.clone()), 12 * H, NOW).unwrap();
         store::set_pin(&mut conn, "p", 1, Some((own, -30))).unwrap();
         let g = guides(&conn)[0].clone().unwrap();
         assert_eq!(start_now(&conn, &g), Some(NOW - H / 2 - 1800));
@@ -1269,7 +1309,7 @@ mod tests {
 
         // A pin to a source removed goes with it.
         store::set_pin(&mut conn, "p", 2, Some((a, 5))).unwrap();
-        sync(&mut conn, &provider(vec![]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![]), 12 * H, NOW).unwrap();
         assert_eq!(count(&conn, "SELECT count(*) FROM source_pin"), 0);
     }
 
@@ -1287,7 +1327,7 @@ mod tests {
         assert_eq!(guides(&conn)[2], None);
         assert!(fetch(&conn).reimport);
         assert_eq!(fetch(&conn).etag, None);
-        let planned = sync(&mut conn, &provider(vec![source.clone()]), NOW).unwrap();
+        let planned = sync(&mut conn, &provider(vec![source.clone()]), 12 * H, NOW).unwrap();
         assert!(planned[0].due && planned[0].reimport);
         let sources = store::channel_sources(&conn, "p", 3).unwrap();
         assert_eq!(sources[1].mapped.as_deref(), Some("summit.b"));
@@ -1321,7 +1361,7 @@ mod tests {
 
         // Removed, its mappings stay for a source with the same identity;
         // forgotten, they go.
-        sync(&mut conn, &provider(vec![]), NOW).unwrap();
+        sync(&mut conn, &provider(vec![]), 12 * H, NOW).unwrap();
         assert_eq!(count(&conn, "SELECT count(*) FROM source_mapping"), 1);
         let renewed = url("https://epg.example.net/a.xml?token=2");
         let b = with_source(&mut conn, vec![renewed]);
@@ -1530,7 +1570,7 @@ mod tests {
         let (dir, mut conn) = db();
         let mut a = url(&format!("{}/guide.xml?token=tok-9x", fake.url()));
         a.max_per_day = Some(4);
-        let planned = sync(&mut conn, &provider(vec![a.clone()]), now).unwrap();
+        let planned = sync(&mut conn, &provider(vec![a.clone()]), 12 * H, now).unwrap();
         assert!(planned[0].due, "new");
         let writer: Writer = Arc::new(Mutex::new(conn));
         let meter = Meter::default();
@@ -1544,7 +1584,7 @@ mod tests {
         drop(writer);
 
         let mut conn = store::open(&dir.path().join("v.db")).unwrap();
-        let planned = sync(&mut conn, &provider(vec![a.clone()]), now).unwrap();
+        let planned = sync(&mut conn, &provider(vec![a.clone()]), 12 * H, now).unwrap();
         assert!(!planned[0].due);
         let writer: Writer = Arc::new(Mutex::new(conn));
         assert_eq!(
@@ -1552,7 +1592,7 @@ mod tests {
             Some(Outcome::Unchanged)
         );
         a.shift_minutes = 30;
-        let planned = sync(&mut writer.lock().unwrap(), &provider(vec![a]), now).unwrap();
+        let planned = sync(&mut writer.lock().unwrap(), &provider(vec![a]), 12 * H, now).unwrap();
         assert_eq!(
             import(&writer, "p", &planned[0], true, &Meter::default()).await,
             Some(Outcome::Fetched(1))
@@ -1584,7 +1624,7 @@ mod tests {
         let (_dir, mut conn) = db();
         let now = unix_now();
         let p = provider(vec![url(&format!("{}/guide.xml", fake.url()))]);
-        let planned = sync(&mut conn, &p, now).unwrap();
+        let planned = sync(&mut conn, &p, 12 * H, now).unwrap();
         let writer: Writer = Arc::new(Mutex::new(conn));
         let Some(Outcome::Backoff { retry_at }) =
             import(&writer, "p", &planned[0], false, &Meter::default()).await
@@ -1598,7 +1638,7 @@ mod tests {
             Some(Outcome::Backoff { retry_at })
         );
         assert_eq!(fake.targets().len(), 1);
-        let due = |at| sync(&mut writer.lock().unwrap(), &p, at).unwrap()[0].due;
+        let due = |at| sync(&mut writer.lock().unwrap(), &p, 12 * H, at).unwrap()[0].due;
         assert!(!due(now));
         // Then due at once, not in 12 h.
         assert!(due(retry_at));
